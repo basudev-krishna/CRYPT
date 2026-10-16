@@ -1,0 +1,15 @@
+node_modules
+.next
+out
+*.log
+.env
+.env.local
+.env.*.local
+coverage
+playwright-report
+test-results
+supabase/.temp
+supabase/.branches
+*.tsbuildinfo
+next-env.d.ts
+.env.test
