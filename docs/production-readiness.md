@@ -27,7 +27,7 @@ Every item below must be complete and signed off before real funds are handled. 
 - [ ] Rate-limit source IP: set `TRUSTED_PROXY_HOPS` to match the real proxy chain and verify it in staging.
 - [ ] Secrets in a secret manager, rotated. Database role passwords must not be the `seed.sql` values.
 - [ ] MFA required for every customer at withdrawal (policy `require_mfa=true`) and for all staff (AAL2 is already enforced server-side). Consider WebAuthn.
-- [ ] Monitoring and alerting on critical risk events, dead-lettered jobs, reconciliation discrepancies and automatic pauses.
+- [x] Monitoring and alerting on critical risk events, dead-lettered jobs, reconciliation discrepancies and automatic pauses. High/critical risk events go to Telegram (`src/server/alerts.ts`); the worker refuses to start in staging/production without it.
 - [ ] Backups, point-in-time recovery, and tested restores.
 - [ ] Daily valuation frequency. The seeded allocation policy is hourly, for local demos only.
 

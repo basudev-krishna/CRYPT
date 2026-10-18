@@ -14,6 +14,7 @@ import { getPool } from '../src/server/investment/orders';
 import { expireUnconfirmed, listOpenWithdrawalIds, monitorWithdrawal, processWithdrawal, type PayoutDeps } from '../src/server/withdrawals/service';
 import { runReconciliation, sweepDeposits } from '../src/server/treasury/reconciliation';
 import { notify, raiseRiskEvent, serviceActor } from '../src/server/ops';
+import { dispatchRiskAlerts, getAlertSender } from '../src/server/alerts';
 import type { JobPayloads } from '../src/server/jobs/queues';
 
 export type Enqueue = <K extends keyof JobPayloads>(name: K, data: JobPayloads[K], opts?: { singletonKey?: string; startAfter?: Date | number }) => Promise<void>;
@@ -96,6 +97,13 @@ export function createHandlers(pool: pg.Pool, enqueue: Enqueue, env: NodeJS.Proc
       await pool.query(
         "update public.notification_events set status = 'failed', attempts = attempts + 1, payload = payload || '{\"delivery_error\":\"no email provider configured\"}'::jsonb where status = 'pending' and channel = 'email'",
       );
+      const sender = getAlertSender(env);
+      if (sender) {
+        const r = await dispatchRiskAlerts(pool, sender, { appEnv: env.APP_ENV ?? 'development' });
+        // Not thrown: unsent events stay queued in the table and retry on the next tick, whereas a
+        // throw would dead-letter this job and raise yet another alert about the same outage.
+        if (r.failed > 0) console.error(JSON.stringify({ t: new Date().toISOString(), msg: 'alerts.delivery_failed', sent: r.sent }));
+      }
     },
 
     async maintenance() {
