@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { admin, balanceOf, closePools, createUser, mineBlocks, resetAppData, simAdapter, simDeposit, simToken, usdt, worker } from '../helpers/db';
+import { admin, balanceOf, closePools, createUser, mineBlocks, resetAppData, simAdapter, simDeposit, simToken, usdt, web as webPool, worker } from '../helpers/db';
 import { creditDeposit, getDepositInstructions, ingestNetwork, investigateTransaction, refreshDeposit, reviewDeposit } from '../../src/server/deposits/service';
 import { SimulatedCustodyProvider } from '../../src/server/custody/simulated';
 import { SimulatedChainAdapter } from '../../src/server/chains/simulated';
@@ -22,6 +22,7 @@ async function addressFor(userId: string) {
   return ins.address;
 }
 // Address issuance is a web action; use the worker pool here for simplicity (both roles may insert).
+// Staff reviews use the real web pool (webPool), so the web ledger-posting rules are exercised.
 const web = () => worker;
 
 /** Ingest, refresh and credit everything once (one worker "tick"). */
@@ -99,10 +100,10 @@ describe('deposit verification and crediting', () => {
     expect(await balanceOf('user_cash', tokenId, user)).toBe(0n);
 
     // The minimum cannot be waived in review: approval is refused, rejection sends it to recovery.
-    await expect(withTransaction(worker, (db) => reviewDeposit(db, d.id, 'approve', 'short', actor))).rejects.toThrow(/note/);
-    await expect(withTransaction(worker, (db) => reviewDeposit(db, d.id, 'approve', 'Customer confirmed; shortfall accepted', actor))).rejects.toMatchObject({ code: 'below_minimum' });
+    await expect(withTransaction(webPool, (db) => reviewDeposit(db, d.id, 'approve', 'short', actor))).rejects.toThrow(/note/);
+    await expect(withTransaction(webPool, (db) => reviewDeposit(db, d.id, 'approve', 'Customer confirmed; shortfall accepted', actor))).rejects.toMatchObject({ code: 'below_minimum' });
     expect((await depositRow()).status).toBe('under_review');
-    await withTransaction(worker, (db) => reviewDeposit(db, d.id, 'reject', 'Below minimum; return to sender via recovery', actor));
+    await withTransaction(webPool, (db) => reviewDeposit(db, d.id, 'reject', 'Below minimum; return to sender via recovery', actor));
     expect((await depositRow()).status).toBe('recovery_required');
     expect(await balanceOf('suspense_deposits', tokenId)).toBe(usdt('49.999999'));
     expect(await balanceOf('user_cash', tokenId, user)).toBe(0n);
@@ -118,9 +119,9 @@ describe('deposit verification and crediting', () => {
     const d = await depositRow();
     expect(d.status).toBe('under_review');
     const self = { type: 'staff' as const, id: user };
-    await expect(withTransaction(worker, (db) => reviewDeposit(db, d.id, 'approve', 'Approving my own deposit here', self))).rejects.toMatchObject({ code: 'conflict_of_interest' });
-    await withTransaction(worker, (db) => reviewDeposit(db, d.id, 'approve', 'Source reviewed and cleared by compliance', { type: 'staff', id: staff }));
-    await withTransaction(worker, (db) => reviewDeposit(db, d.id, 'approve', 'Second approval must not double credit', { type: 'staff', id: staff })).catch(() => undefined);
+    await expect(withTransaction(webPool, (db) => reviewDeposit(db, d.id, 'approve', 'Approving my own deposit here', self))).rejects.toMatchObject({ code: 'conflict_of_interest' });
+    await withTransaction(webPool, (db) => reviewDeposit(db, d.id, 'approve', 'Source reviewed and cleared by compliance', { type: 'staff', id: staff }));
+    await withTransaction(webPool, (db) => reviewDeposit(db, d.id, 'approve', 'Second approval must not double credit', { type: 'staff', id: staff })).catch(() => undefined);
     expect((await depositRow()).status).toBe('credited');
     expect((await admin.query("select count(*)::int as n from public.journal_entries where event_type = 'deposit_credit'")).rows[0].n).toBe(1);
   });

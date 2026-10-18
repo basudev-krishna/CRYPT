@@ -187,6 +187,31 @@ describe('withdrawals', () => {
     expect((await processWithdrawal(worker, deps(), w.id)).outcome).toBe('broadcast');
   });
 
+  it('does not let the web role release a reservation once a payout attempt is live', async () => {
+    const u = await createUser();
+    await fundUser(u, '100');
+    const w = await request(u, '20');
+    await confirm(u, w.id);
+    await endCooldown();
+    expect((await processWithdrawal(worker, deps(), w.id)).outcome).toBe('broadcast');
+
+    const cash = await ensureAccount(worker, 'user_cash', tokenId, { userId: u });
+    const reserved = await ensureAccount(worker, 'user_reserved', tokenId, { userId: u });
+    const release = (db: Db) =>
+      postEntry(db, { idempotencyKey: `withdrawal:${w.id}:release`, eventType: 'withdrawal_released', sourceType: 'withdrawal', sourceId: w.id, description: 'x', postedBy: 'user:x', lines: transfer(reserved, cash, usdt('20')) });
+    await expect(withTransaction(web, release)).rejects.toThrow(/not allowed in this withdrawal state/);
+    // A compromised web server walks the status back to 'reserved' (allowed transitions), then releases.
+    await withTransaction(web, async (db) => {
+      await db.query("update public.withdrawal_requests set status = 'processing' where id = $1", [w.id]);
+      await db.query("update public.withdrawal_requests set status = 'reserved' where id = $1", [w.id]);
+      await release(db);
+    }).then(
+      () => expect.unreachable('release should have been refused'),
+      (e: Error) => expect(e.message).toMatch(/live payout attempt/),
+    );
+    expect(await balanceOf('user_reserved', tokenId, u)).toBe(usdt('20'));
+  });
+
   it('lets the user cancel before processing and restores the balance', async () => {
     const u = await createUser();
     await fundUser(u, '100');

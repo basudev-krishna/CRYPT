@@ -6,6 +6,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { admin, closePools, createUser, resetAppData, simToken, web, worker } from '../helpers/db';
 import { one } from '../../src/server/db-core';
+import { ensureAccount, postEntry, transfer } from '../../src/server/ledger/ledger';
 
 let poolId: number;
 
@@ -69,6 +70,46 @@ describe('web role (Next.js server) privileges', () => {
     await expect(web.query("update public.audit_events set action = 'edited'")).rejects.toThrow(/permission denied|not allowed/);
     await expect(web.query('delete from public.audit_events')).rejects.toThrow(/permission denied|not allowed/);
     await expect(admin.query('delete from public.audit_events')).rejects.toThrow(/not allowed/); // append-only even for the owner
+  });
+
+  it('can only post ledger entries bound to a source row it is allowed to act on', async () => {
+    const tokenId = (await simToken()).id;
+    const a = await createUser();
+    const b = await createUser();
+    const post = (lines: ReturnType<typeof transfer>, over: Partial<Parameters<typeof postEntry>[1]> = {}) =>
+      postEntry(web, { idempotencyKey: `k:${Math.random()}`, eventType: 'x', sourceType: 'x', sourceId: 'x', description: 'x', postedBy: 'user:x', lines, ...over });
+
+    // Minting: treasury -> equity, or suspense -> any customer, without a source.
+    const hot = await ensureAccount(worker, 'treasury_hot', tokenId);
+    const equity = await ensureAccount(worker, 'owner_equity', tokenId);
+    const suspense = await ensureAccount(worker, 'suspense_deposits', tokenId);
+    const cashA = await ensureAccount(worker, 'user_cash', tokenId, { userId: a });
+    await expect(post(transfer(hot, equity, 1000000n), { eventType: 'capital' })).rejects.toThrow(/may not post capital/);
+    const fakeId = '00000000-0000-0000-0000-000000000000';
+    await expect(
+      post(transfer(suspense, cashA, 1000000n), { eventType: 'deposit_credit', sourceType: 'deposit', sourceId: fakeId, idempotencyKey: `deposit:credit:${fakeId}` }),
+    ).rejects.toThrow(/fully confirmed deposit under review/);
+
+    // A real pending order for A cannot move cash into B's account, change the amount, or use a fresh key.
+    const order = await one<{ id: string }>(web, "insert into public.investment_orders (pool_id, user_id, kind, amount_base, idempotency_key) values ($1, $2, 'subscription', 1000000, $3) returning id", [poolId, a, `${a}:k`]);
+    const pendingA = await ensureAccount(worker, 'user_pending_subscription', tokenId, { userId: a });
+    const pendingB = await ensureAccount(worker, 'user_pending_subscription', tokenId, { userId: b });
+    const sub = { eventType: 'subscription_requested', sourceType: 'investment_order', sourceId: order.id, idempotencyKey: `subscription:request:${order.id}` };
+    await expect(post(transfer(cashA, pendingB, 1000000n), sub)).rejects.toThrow(/another customer/);
+    await expect(post(transfer(cashA, pendingA, 2000000n), sub)).rejects.toThrow(/does not match its source/);
+    await expect(post(transfer(cashA, pendingA, 1000000n), { ...sub, idempotencyKey: `subscription:request:${order.id}:again` })).rejects.toThrow(/deterministic key/);
+
+    // No reversals, and no rewriting the deposit fields those checks rely on.
+    const lines = JSON.stringify([
+      { account_id: Number(cashA), direction: 'D', amount: '1000000' },
+      { account_id: Number(pendingA), direction: 'C', amount: '1000000' },
+    ]);
+    await expect(
+      web.query("select ledger.post_entry($1, 'subscription_requested', 'investment_order', $2, 'd', 'user:x', $3::jsonb, '{}'::jsonb, 1)", [sub.idempotencyKey, order.id, lines]),
+    ).rejects.toThrow(/may not post reversals/);
+    await expect(web.query('update public.deposits set amount_base = 1')).rejects.toThrow(/permission denied/);
+    await expect(web.query('update public.deposits set user_id = $1', [a])).rejects.toThrow(/permission denied/);
+    await expect(web.query('update public.deposits set confirmations = 999')).rejects.toThrow(/permission denied/);
   });
 
   it('accepts each internal request signature only once', async () => {

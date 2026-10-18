@@ -23,7 +23,7 @@ Every item below must be complete and signed off before real funds are handled. 
 
 ## Security hardening still open
 
-- [ ] Constrain `ledger.post_entry` per role. The web role can still post any balanced entry; a per-role allowlist of event types and account purposes would limit a compromised web server.
+- [x] Constrain `ledger.post_entry` per role. The web role may only post the six entry kinds it needs, each bound to its source row (`20261018000100_web_posting_scope.sql`); app_worker is unrestricted.
 - [ ] Rate-limit source IP: set `TRUSTED_PROXY_HOPS` to match the real proxy chain and verify it in staging.
 - [ ] Secrets in a secret manager, rotated. Database role passwords must not be the `seed.sql` values.
 - [ ] MFA required for every customer at withdrawal (policy `require_mfa=true`) and for all staff (AAL2 is already enforced server-side). Consider WebAuthn.
