@@ -1,9 +1,11 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter, JetBrains_Mono } from 'next/font/google';
+import { Inter, Inter_Tight, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' });
 const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-jbmono', display: 'swap' });
+// Self-hosted at build time; landing-page headings only.
+const display = Inter_Tight({ subsets: ['latin'], weight: '700', variable: '--font-display', display: 'swap' });
 
 export const metadata: Metadata = {
   title: { default: 'EliteWhale (Testnet)', template: '%s · EliteWhale (Testnet)' },
@@ -15,7 +17,7 @@ export const viewport: Viewport = { themeColor: '#0a0f1c', width: 'device-width'
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${mono.variable}`}>
+    <html lang="en" className={`${inter.variable} ${mono.variable} ${display.variable}`}>
       <body className="min-h-screen" style={{ fontFamily: 'var(--font-inter), var(--font-sans)' }}>
         <EnvironmentBanner />
         {children}

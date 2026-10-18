@@ -5,7 +5,9 @@ test.describe('public pages', () => {
   test('landing page states it is a testnet build with simulated trading', async ({ page }) => {
     await page.goto('/');
     await expect(page.getByText(/Testnet MVP/i)).toBeVisible();
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('auditable USDT investment ledger');
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Auditable');
+    await expect(page.getByRole('heading', { name: 'What this build is not' })).toBeVisible();
+    await expect(page.getByRole('cell', { name: 'Blocked in code' })).toBeVisible();
   });
 
   test('sends security headers', async ({ request }) => {

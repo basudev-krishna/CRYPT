@@ -54,3 +54,13 @@
     }
   }
 }
+
+/* Light marketing palette, scoped so it never leaks into the dark app tokens. */
+.landing {
+  --font-heading: var(--font-display), var(--font-inter), sans-serif;
+  --font-body: var(--font-inter), 'Inter', sans-serif;
+  --color-text: #192837;
+  --color-accent: #7342e2;
+  --color-login-bg: #f2f2ee;
+  color-scheme: light;
+}
