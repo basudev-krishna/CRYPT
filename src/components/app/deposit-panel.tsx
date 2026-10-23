@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 import { apiPost } from '@/lib/api-client';
 import { Badge, Button, Card, CardHeader, Field, Input, Notice, Select } from '@/components/ui/primitives';
 import { fmt } from '@/components/ui/money';
+import { MemberWallets } from './member-wallets';
 
 interface NetworkOption {
   id: number;
@@ -18,6 +19,7 @@ interface Instructions {
   network: { id: number; code: string; name: string; isTestnet: boolean; isSimulated: boolean; requiredConfirmations: number };
   token: { id: number; symbol: string; contractAddress: string; decimals: number; isTestToken: boolean };
   address: string;
+  mode: 'group_wallet' | 'deposit_address';
   minDepositBase: string;
 }
 
@@ -33,7 +35,7 @@ export function DepositPanel({ networks, demoMode }: { networks: NetworkOption[]
   useEffect(() => {
     if (!ins) return;
     // Only the address is encoded: wallets must still be set to the right network manually.
-    QRCode.toDataURL(ins.address, { margin: 1, width: 180, color: { dark: '#0a0f1c', light: '#e6ebf5' } }).then(setQr, () => setQr(null));
+    QRCode.toDataURL(ins.address, { margin: 1, width: 180, color: { dark: '#192837', light: '#ffffff' } }).then(setQr, () => setQr(null));
   }, [ins]);
 
   async function load() {
@@ -97,10 +99,12 @@ export function DepositPanel({ networks, demoMode }: { networks: NetworkOption[]
         ) : null}
       </Card>
 
+      {ins?.mode === 'group_wallet' ? <MemberWallets networkId={ins.network.id} networkName={ins.network.name} /> : null}
+
       {ins ? (
         <Card>
           <CardHeader
-            title="2. Send tokens to this address"
+            title={ins.mode === 'group_wallet' ? '2. Send to the group wallet' : '2. Send tokens to this address'}
             action={
               <div className="flex gap-2">
                 {ins.network.isSimulated ? <Badge tone="sim">Simulated network</Badge> : <Badge tone="info">Testnet</Badge>}
@@ -115,9 +119,9 @@ export function DepositPanel({ networks, demoMode }: { networks: NetworkOption[]
             </div>
             <dl className="space-y-3 text-sm">
               <div>
-                <dt className="text-xs uppercase tracking-wider text-fg-subtle">Deposit address</dt>
+                <dt className="text-xs uppercase tracking-wider text-fg-subtle">{ins.mode === 'group_wallet' ? 'Group wallet address' : 'Deposit address'}</dt>
                 <dd className="mt-1 flex flex-wrap items-center gap-2">
-                  <code className="break-all rounded bg-bg/70 px-2 py-1 font-mono text-xs">{ins.address}</code>
+                  <code className="break-all rounded-lg bg-surface-3 px-2.5 py-1.5 font-mono text-xs">{ins.address}</code>
                   <Button
                     variant="secondary"
                     className="h-8 px-3 text-xs"
@@ -157,6 +161,12 @@ export function DepositPanel({ networks, demoMode }: { networks: NetworkOption[]
             <Notice tone="warn" title="Before you send">
               <ul className="list-disc space-y-1 pl-5">
                 <li>Send only {ins.token.symbol} on {ins.network.name}. Other tokens or networks are not credited and require a manual recovery review.</li>
+                {ins.mode === 'group_wallet' ? (
+                  <li>
+                    Send from a wallet registered above. Deposits from exchanges or unregistered wallets are not credited to you automatically; they wait until an administrator
+                    assigns them.
+                  </li>
+                ) : null}
                 <li>Deposits below the minimum are held for review and are not invested automatically.</li>
                 <li>Network fees are paid by the sender; you are credited the exact amount received.</li>
                 <li>Your balance updates only after {ins.network.requiredConfirmations} confirmations and compliance checks.</li>

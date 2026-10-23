@@ -10,14 +10,14 @@ export async function PublicShell({ children }: { children: ReactNode }) {
       <header className="flex items-center justify-between py-5">
         <Logo />
         <nav className="flex items-center gap-1 text-sm">
-          <Link href="/disclosures" className="rounded-md px-3 py-2 text-fg-muted hover:text-fg">Risk disclosure</Link>
-          <Link href="/support" className="rounded-md px-3 py-2 text-fg-muted hover:text-fg">FAQ</Link>
+          <Link href="/disclosures" className="rounded-full px-3 py-2 text-fg-muted transition hover:bg-white hover:text-fg">Risk disclosure</Link>
+          <Link href="/support" className="rounded-full px-3 py-2 text-fg-muted transition hover:bg-white hover:text-fg">FAQ</Link>
           {user ? (
-            <Link href="/dashboard" className="rounded-md bg-accent px-3 py-2 font-medium text-white hover:bg-accent-strong">Open app</Link>
+            <Link href="/dashboard" className="rounded-full bg-accent px-4 py-2 font-medium text-white transition hover:-translate-y-px hover:bg-accent-strong">Open app</Link>
           ) : (
             <>
-              <Link href="/login" className="rounded-md px-3 py-2 text-fg-muted hover:text-fg">Sign in</Link>
-              <Link href="/register" className="rounded-md bg-accent px-3 py-2 font-medium text-white hover:bg-accent-strong">Create account</Link>
+              <Link href="/login" className="rounded-full px-3 py-2 text-fg-muted transition hover:bg-white hover:text-fg">Sign in</Link>
+              <Link href="/register" className="rounded-full bg-accent px-4 py-2 font-medium text-white transition hover:-translate-y-px hover:bg-accent-strong">Create account</Link>
             </>
           )}
         </nav>

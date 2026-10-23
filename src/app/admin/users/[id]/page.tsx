@@ -25,13 +25,20 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
       <PageHeader title={p.email} description={`User ${id}`} />
       <div className="grid gap-6 xl:grid-cols-3">
         <Card>
-          <CardHeader title="Account status" action={<Badge tone={p.account_status === 'active' ? 'success' : 'danger'}>{p.account_status}</Badge>} />
+          <CardHeader title="Account status" action={<Badge tone={p.account_status === 'active' ? 'success' : p.account_status === 'pending_approval' ? 'warn' : 'danger'}>{p.account_status.replace('_', ' ')}</Badge>} />
           {p.restriction_reason ? <p className="mb-3 text-sm text-fg-muted">{p.restriction_reason}</p> : null}
-          <NoteAction url={`/api/admin/users/${id}/status`} noteField="reason" options={[
-            { value: 'restricted', label: 'Restrict (no deposits/withdrawals)', field: 'status' },
-            { value: 'frozen', label: 'Freeze', field: 'status' },
-            { value: 'active', label: 'Reactivate', field: 'status' },
-          ]} submitLabel="Apply" noteLabel="Documented reason" />
+          {p.account_status === 'pending_approval' || p.account_status === 'rejected' ? (
+            <NoteAction url={`/api/admin/users/${id}/approval`} options={[
+              { value: 'approve', label: 'Approve sign-up', field: 'decision' },
+              ...(p.account_status === 'pending_approval' ? [{ value: 'reject', label: 'Reject sign-up', field: 'decision' }] : []),
+            ]} submitLabel="Decide" noteLabel="Documented note" />
+          ) : (
+            <NoteAction url={`/api/admin/users/${id}/status`} noteField="reason" options={[
+              { value: 'restricted', label: 'Restrict (no deposits/withdrawals)', field: 'status' },
+              { value: 'frozen', label: 'Freeze', field: 'status' },
+              { value: 'active', label: 'Reactivate', field: 'status' },
+            ]} submitLabel="Apply" noteLabel="Documented reason" />
+          )}
         </Card>
         <Card>
           <CardHeader title="Balances (ledger)" />

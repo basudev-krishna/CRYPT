@@ -14,7 +14,7 @@ EliteWhale is a **testnet-only** USDT investment ledger: deposits → pooled inv
 4. **Every financial write runs in one DB transaction** (`withTransaction` / `withWebTransaction`). Lock the payer balance (`lockBalance`) before checking it, and re-check limits under the lock.
 5. **Retries must be harmless.** Jobs, API requests and custody calls can run more than once. Use idempotency keys, unique constraints and `on conflict do nothing`, and reuse the same custody key on retry.
 6. **Fail closed.** If something is unknown (missing price, unreadable balance, screening down, stale reconciliation, custody/chain disagreement), hold or pause. Never approve, credit or settle on missing information.
-7. **Authorization is server-side.** Every route calls `requireUser` / `requirePermission(...)`. Customer queries filter by the session user id. Staff actions need the permission in `src/server/permissions.ts`, an AAL2 session, a documented note, an audit record, and no self-review.
+7. **Authorization is server-side.** Every route calls `requireUser` / `requirePermission(...)`. Customer queries filter by the session user id. Staff actions need the permission in `src/server/permissions.ts`, an AAL2 session, a documented note, an audit record, and no self-review. Exception: while there is exactly one administrator (`isSoleAdmin`), self-review of deposits/withdrawals and resuming one's own pause (after a 1-hour cooldown) are allowed, but each raises a high-severity risk event (Telegram). Adding a second admin restores four-eyes automatically. Admin allocations, corrections and manual payouts always raise one.
 8. Never claim production readiness. See `docs/production-readiness.md`.
 
 ## Architecture map
@@ -26,6 +26,8 @@ EliteWhale is a **testnet-only** USDT investment ledger: deposits → pooled inv
 | Investment | `src/server/investment/{pnl,nav,orders,valuation}.ts`, `src/server/trading/*` |
 | Withdrawals | `src/server/withdrawals/{policy,service}.ts` (create → confirm/reserve → payout phases A/B/C → monitor/settle) |
 | Treasury | `src/server/treasury/reconciliation.ts` (auto-pauses withdrawals on discrepancy) |
+| Group mode | `src/server/deposits/{member-wallets,wallet-proof,allocations}.ts` (shared watched wallet, deposits attributed by signed sender wallet, admin assign/distribute/correct), `src/server/custody/manual.ts` + `src/server/withdrawals/manual-payouts.ts` (admin signs payouts, hash verified on chain), `GROUP_MODE` / `CUSTODY_PROVIDER=manual`, `scripts/setup-staging.ts group-mode` |
+| Membership | `src/server/signup.ts` (username/email sign-in, registration fields), `src/server/approvals.ts` (admin approval of new sign-ups, `/admin/approvals`), `*_signup_approval*.sql` (new Auth sign-ups start `pending_approval`), `*_membership.sql` (member ids, sponsors; invitation gate currently switched off) |
 | Ops | `src/server/ops.ts` (audit, risk events, notifications, controls, versioned policies) |
 | HTTP | `src/server/http/{api,auth,internal}.ts`. `route()` adds CSRF, rate limit and error mapping; `/internal/*` uses HMAC + nonce |
 | Worker | `workers/index.ts` (pg-boss queues, scheduler), `workers/handlers.ts` |

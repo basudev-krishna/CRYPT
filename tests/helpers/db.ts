@@ -10,6 +10,8 @@
  * uses the superuser connection.
  */
 import pg from 'pg';
+import { readFileSync } from 'node:fs';
+import { parse } from 'dotenv';
 import { randomUUID } from 'node:crypto';
 import { configurePgTypes, one, type Db } from '../../src/server/db-core';
 import { insertSimTransfer } from '../../src/server/chains/simulated';
@@ -19,10 +21,32 @@ import { parseUnits } from '../../src/lib/money';
 
 configurePgTypes();
 
+/**
+ * The suite truncates every application table, so it may only touch a database
+ * that holds nothing worth keeping: local Supabase, or a separate hosted test
+ * project named explicitly in INTEGRATION_TEST_DB_HOST (in .env.test). The
+ * project the app itself uses (.env.local) is always refused.
+ */
+function appProjectRef(): string | null {
+  try {
+    const url = parse(readFileSync('.env.local')).NEXT_PUBLIC_SUPABASE_URL;
+    return url ? new URL(url).hostname.split('.')[0] ?? null : null;
+  } catch {
+    return null;
+  }
+}
+
 function requireLocal(url: string | undefined, name: string): string {
   if (!url) throw new Error(`${name} must be set for integration tests (see .env.example)`);
   const host = new URL(url).hostname;
-  if (!['127.0.0.1', 'localhost'].includes(host)) throw new Error(`Refusing to run destructive tests against non-local database host ${host}`);
+  if (['127.0.0.1', 'localhost'].includes(host)) return url;
+  const ref = appProjectRef();
+  if (ref && (host.includes(ref) || new URL(url).username.includes(ref))) {
+    throw new Error(`Refusing to run destructive tests against the app's own Supabase project (${host}). Use a separate test project in .env.test.`);
+  }
+  if (process.env.INTEGRATION_TEST_DB_HOST !== host) {
+    throw new Error(`Refusing to run destructive tests against non-local database host ${host}; set INTEGRATION_TEST_DB_HOST=${host} in .env.test if it is a dedicated test project`);
+  }
   return url;
 }
 
@@ -32,17 +56,18 @@ export const web = new pg.Pool({ connectionString: requireLocal(process.env.DATA
 
 const APP_TABLES = [
   'journal_lines', 'journal_entries', 'account_balances', 'ledger_accounts',
-  'deposits', 'chain_transactions', 'network_scan_state', 'deposit_addresses', 'sim_chain_transfers',
+  'deposits', 'chain_transactions', 'network_scan_state', 'deposit_addresses', 'member_wallets', 'sim_chain_transfers',
   'investment_orders', 'investment_positions', 'performance_allocations', 'portfolio_valuations',
   'trade_executions', 'trade_import_batches', 'sim_venue_executions', 'treasury_transfers',
   'withdrawal_transactions', 'withdrawal_destinations', 'withdrawal_requests',
   'treasury_snapshots', 'reconciliation_runs', 'risk_events', 'audit_events', 'notification_events',
-  'rate_limits', 'internal_request_nonces', 'kyc_records', 'staff_roles',
+  'rate_limits', 'internal_request_nonces', 'kyc_records', 'staff_roles', 'member_invitations',
 ];
 
 export async function resetAppData(): Promise<void> {
   await admin.query(`truncate ${APP_TABLES.map((t) => `public.${t}`).join(', ')} restart identity cascade`);
   await admin.query("update public.system_controls set enabled = false, reason = null");
+  await admin.query('update public.treasury_wallets set receives_deposits = false');
   await admin.query('update public.investment_pools set high_water_mark = inception_navpu');
   await admin.query("delete from public.supported_networks where code like 'test-%'");
   await admin.query("delete from public.user_profiles where email like '%@test.local'");

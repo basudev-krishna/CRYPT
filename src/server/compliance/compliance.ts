@@ -4,7 +4,7 @@
 import { maybeOne, type Db } from '../db-core';
 
 export type KycStatus = 'not_started' | 'pending' | 'approved' | 'rejected' | 'expired';
-export type AccountStatus = 'active' | 'restricted' | 'frozen' | 'closed';
+export type AccountStatus = 'active' | 'restricted' | 'frozen' | 'closed' | 'pending_approval' | 'rejected';
 
 export async function getKycStatus(db: Db, userId: string): Promise<KycStatus> {
   const row = await maybeOne<{ status: KycStatus }>(db, 'select status from public.user_kyc_current where user_id = $1', [userId]);

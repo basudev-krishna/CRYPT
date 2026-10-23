@@ -1,3 +1,5 @@
+import { redirect } from 'next/navigation';
+import { serverEnv } from '@/server/env';
 import type { Metadata } from 'next';
 import { webDb } from '@/server/db';
 import { adminTrading } from '@/server/queries/admin';
@@ -15,6 +17,8 @@ type Trade = { id: string; venue: string; external_execution_id: string; symbol:
 type Batch = { id: string; venue: string; received: number; inserted: number; duplicates: number; rejected: number; errors: unknown; created_at: Date };
 
 export default async function AdminTradingPage() {
+  // Group mode has no investment pool.
+  if (serverEnv().GROUP_MODE) redirect('/admin');
   const t = await adminTrading(webDb());
   const valuations = t.valuations as Val[];
   const trades = t.trades as Trade[];

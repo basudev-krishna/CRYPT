@@ -8,6 +8,8 @@ export const QUEUES = {
   depositRefresh: 'deposit.refresh',
   depositCredit: 'deposit.credit',
   depositInvestigate: 'deposit.investigate',
+  allocationPost: 'allocation.post',
+  correctionPost: 'correction.post',
   treasurySweep: 'treasury.sweep',
   tradesImport: 'trades.import',
   valuationRun: 'valuation.run',
@@ -26,6 +28,8 @@ export interface JobPayloads {
   'deposit.refresh': { depositId: string };
   'deposit.credit': { depositId: string };
   'deposit.investigate': { networkId: number; txHash: string; requestedBy: string };
+  'allocation.post': { allocationId: string };
+  'correction.post': { correctionId: string };
   'treasury.sweep': { networkId: number };
   'trades.import': { poolId: number };
   'valuation.run': { poolId: number };

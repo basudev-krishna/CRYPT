@@ -14,6 +14,8 @@ const schema = z.object({
   DATABASE_URL_WEB: z.string().startsWith('postgres'),
   INTERNAL_API_SECRET: z.string().min(32, 'INTERNAL_API_SECRET must be at least 32 characters'),
   DEMO_MODE: bool,
+  /** Private-group operation: no investment pool; hides portfolio and trading pages. */
+  GROUP_MODE: bool,
   REAL_FUNDS_ENABLED: bool,
 });
 

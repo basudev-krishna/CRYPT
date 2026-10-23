@@ -74,6 +74,8 @@ async function main() {
   await register(QUEUES.depositRefresh, h.depositRefresh, 4);
   await register(QUEUES.depositCredit, h.depositCredit, 2);
   await register(QUEUES.depositInvestigate, h.depositInvestigate);
+  await register(QUEUES.allocationPost, h.allocationPost, 1);
+  await register(QUEUES.correctionPost, h.correctionPost, 1);
   await register(QUEUES.treasurySweep, h.treasurySweep, 1);
   await register(QUEUES.tradesImport, h.tradesImport, 1);
   await register(QUEUES.valuationRun, h.valuationRun, 1);

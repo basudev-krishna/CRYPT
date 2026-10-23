@@ -75,15 +75,44 @@ export async function adminOverview(db: Db) {
 }
 
 export async function adminUsers(db: Db, search: string | null, limit = 50) {
-  return many<{ user_id: string; email: string; account_status: string; kyc: string | null; created_at: Date; cash: string; roles: string[] | null }>(
+  return many<{ user_id: string; email: string; member_code: string; sponsor_code: string | null; account_status: string; kyc: string | null; created_at: Date; cash: string; roles: string[] | null }>(
     db,
-    `select p.user_id, p.email, p.account_status, k.status::text as kyc, p.created_at,
+    `select p.user_id, p.email, p.member_code, s.member_code as sponsor_code, p.account_status, k.status::text as kyc, p.created_at,
             coalesce((select sum(cash_base) from public.user_ledger_balances b where b.user_id = p.user_id), 0)::text as cash,
             (select array_agg(role::text) from public.staff_roles r where r.user_id = p.user_id) as roles
        from public.user_profiles p left join public.user_kyc_current k on k.user_id = p.user_id
-      where ($1::text is null or p.email ilike '%' || $1 || '%' or p.user_id::text = $1)
+       left join public.user_profiles s on s.user_id = p.sponsor_user_id
+      where ($1::text is null or p.email ilike '%' || $1 || '%' or p.user_id::text = $1 or p.member_code = upper($1))
       order by p.created_at desc limit $2`,
     [search, limit],
+  );
+}
+
+export async function adminInvitations(db: Db, limit = 100) {
+  return many<{
+    id: string;
+    email: string;
+    status: 'pending' | 'accepted' | 'revoked';
+    expired: boolean;
+    sponsor_code: string | null;
+    member_code: string | null;
+    note: string;
+    created_by: string;
+    created_at: Date;
+    expires_at: Date;
+    accepted_at: Date | null;
+    revoked_at: Date | null;
+    revoke_reason: string | null;
+  }>(
+    db,
+    `select i.id, i.email, i.status, (i.status = 'pending' and i.expires_at <= now()) as expired,
+            s.member_code as sponsor_code, m.member_code, i.note, i.created_by, i.created_at, i.expires_at,
+            i.accepted_at, i.revoked_at, i.revoke_reason
+       from public.member_invitations i
+       left join public.user_profiles s on s.user_id = i.sponsor_user_id
+       left join public.user_profiles m on m.user_id = i.accepted_user_id
+      order by i.created_at desc limit $1`,
+    [limit],
   );
 }
 
@@ -124,12 +153,21 @@ export async function adminDeposits(db: Db, status: string | null, limit = 100) 
     detected_at: Date;
     risk_result: unknown;
     is_simulated: boolean;
+    decimals: number | null;
+    credit_entry_id: string | null;
+    group_wallet: boolean;
+    allocation_status: string | null;
+    correction_pending: boolean;
   }>(
     db,
     `select d.id, d.user_id, p.email, d.status::text, d.status_reason, d.amount_base::text, d.confirmations, d.required_confirmations,
-            c.tx_hash, c.from_address, n.code as network, d.detected_at, d.risk_result, c.is_simulated
+            c.tx_hash, c.from_address, n.code as network, d.detected_at, d.risk_result, c.is_simulated,
+            t.decimals, d.credit_entry_id, d.treasury_wallet_id is not null as group_wallet,
+            (select a.status from public.allocations a where a.deposit_id = d.id and a.status in ('pending', 'posted') limit 1) as allocation_status,
+            exists (select 1 from public.deposit_corrections k where k.deposit_id = d.id and k.status = 'pending') as correction_pending
        from public.deposits d join public.chain_transactions c on c.id = d.chain_transaction_id
        join public.supported_networks n on n.id = d.network_id left join public.user_profiles p on p.user_id = d.user_id
+       left join public.supported_tokens t on t.id = d.token_id
       where ($1::text is null or d.status::text = $1) order by d.detected_at desc limit $2`,
     [status, limit],
   );
@@ -231,5 +269,85 @@ export async function adminPolicies(db: Db) {
   return many<{ id: string; kind: string; version: number; params: unknown; effective_from: Date; change_note: string; created_by: string; approved_by: string | null }>(
     db,
     'select id, kind::text, version, params, effective_from, change_note, created_by, approved_by from public.policy_versions order by kind, version desc',
+  );
+}
+
+export interface SignupRow {
+  user_id: string;
+  email: string;
+  member_code: string;
+  display_name: string | null;
+  username: string | null;
+  phone: string | null;
+  country_code: string | null;
+  sponsor_code: string | null;
+  account_status: 'pending_approval' | 'rejected' | 'active' | 'restricted' | 'frozen' | 'closed';
+  restriction_reason: string | null;
+  created_at: Date;
+  reviewed_at: Date | null;
+  reviewed_by_email: string | null;
+}
+
+/** The approval queue: every pending or rejected sign-up, plus decisions from the last 30 days. */
+export async function adminSignups(db: Db): Promise<SignupRow[]> {
+  return many<SignupRow>(
+    db,
+    `select p.user_id, p.email, p.member_code, p.display_name, p.username, p.phone, p.country_code, s.member_code as sponsor_code,
+            p.account_status::text as account_status, p.restriction_reason, p.created_at, p.reviewed_at, r.email as reviewed_by_email
+       from public.user_profiles p
+       left join public.user_profiles r on r.user_id = p.reviewed_by
+       left join public.user_profiles s on s.user_id = p.sponsor_user_id
+      where p.account_status in ('pending_approval', 'rejected')
+         or p.reviewed_at > now() - interval '30 days'
+      order by (p.account_status = 'pending_approval') desc, coalesce(p.reviewed_at, p.created_at) desc
+      limit 500`,
+  );
+}
+
+/** Sign-up counts for the overview, including new accounts per day for the last 14 days (UTC). */
+export async function signupStats(db: Db) {
+  const totals = await one<{ pending: number; approved_7d: number; rejected_7d: number; oldest_pending: Date | null }>(
+    db,
+    `select count(*) filter (where account_status = 'pending_approval')::int as pending,
+            count(*) filter (where account_status <> 'rejected' and reviewed_at > now() - interval '7 days')::int as approved_7d,
+            count(*) filter (where account_status = 'rejected' and reviewed_at > now() - interval '7 days')::int as rejected_7d,
+            min(created_at) filter (where account_status = 'pending_approval') as oldest_pending
+       from public.user_profiles`,
+  );
+  const daily = await many<{ day: string; n: number }>(
+    db,
+    `select to_char(d, 'YYYY-MM-DD') as day, count(p.user_id)::int as n
+       from generate_series((now() at time zone 'utc')::date - 13, (now() at time zone 'utc')::date, interval '1 day') d
+       left join public.user_profiles p on (p.created_at at time zone 'utc')::date = d::date
+      group by d order by d`,
+  );
+  return { pending: totals.pending, approved7d: totals.approved_7d, rejected7d: totals.rejected_7d, oldestPending: totals.oldest_pending, daily };
+}
+
+/** The queue in the serializable shape the interactive client component takes. */
+export async function adminSignupQueue(db: Db) {
+  return (await adminSignups(db)).map((r) => ({
+    userId: r.user_id,
+    email: r.email,
+    memberCode: r.member_code,
+    fullName: r.display_name,
+    username: r.username,
+    phone: r.phone,
+    country: r.country_code,
+    referredBy: r.sponsor_code,
+    status: r.account_status,
+    reason: r.restriction_reason,
+    createdAt: r.created_at.toISOString(),
+    reviewedAt: r.reviewed_at?.toISOString() ?? null,
+    reviewedBy: r.reviewed_by_email,
+  }));
+}
+
+/** Active members, for choosing allocation recipients. */
+export async function adminActiveMembers(db: Db) {
+  return many<{ user_id: string; email: string | null; member_code: string; display_name: string | null; username: string | null }>(
+    db,
+    `select user_id, email, member_code, display_name, username from public.user_profiles
+      where account_status = 'active' order by member_code`,
   );
 }

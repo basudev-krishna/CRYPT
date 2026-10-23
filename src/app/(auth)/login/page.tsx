@@ -8,12 +8,17 @@ export const metadata: Metadata = { title: 'Sign in' };
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
   const { notice } = await searchParams;
   return (
-    <Card>
-      <h1 className="mb-1 text-xl font-semibold">Sign in</h1>
-      <p className="mb-6 text-sm text-fg-muted">Access your testnet account.</p>
+    <Card className="p-6 sm:p-8">
+      <h1 className="text-2xl font-semibold tracking-tight">Sign in to EliteWhale</h1>
+      <p className="mb-6 mt-1 text-sm text-fg-muted">Enter your username or email and password.</p>
       {notice === 'verify' ? (
         <div className="mb-4">
           <Notice tone="warn" title="Verify your email">Open the confirmation link we sent you, then sign in.</Notice>
+        </div>
+      ) : null}
+      {notice === 'link-expired' ? (
+        <div className="mb-4">
+          <Notice tone="warn" title="Link expired">That link is invalid or has expired. Sign in, or request a new password reset.</Notice>
         </div>
       ) : null}
       {notice === 'reset' ? (
@@ -22,10 +27,12 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         </div>
       ) : null}
       <LoginForm />
-      <div className="mt-6 flex justify-between text-sm">
-        <Link href="/register" className="text-accent hover:underline">Create account</Link>
+      <div className="mt-4 text-right text-sm">
         <Link href="/forgot-password" className="text-fg-muted hover:text-fg">Forgot password?</Link>
       </div>
+      <p className="mt-6 text-center text-sm text-fg-muted">
+        Don&apos;t have an account? <Link href="/register" className="font-medium text-accent hover:underline">Register now</Link>
+      </p>
     </Card>
   );
 }

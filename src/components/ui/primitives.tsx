@@ -5,7 +5,10 @@ import type { ComponentProps, ReactNode } from 'react';
 export function Card({ className, children, ...rest }: ComponentProps<'section'>) {
   return (
     <section
-      className={clsx('rounded-[var(--radius-card)] border border-line bg-gradient-to-b from-surface-2/80 to-surface/80 p-5 shadow-[0_1px_0_rgba(255,255,255,0.03)_inset]', className)}
+      className={clsx(
+        'rounded-[var(--radius-card)] bg-white/75 p-5 shadow-[0_1px_2px_rgba(25,40,55,0.04),0_8px_28px_-12px_rgba(25,40,55,0.12)] ring-1 ring-black/5 backdrop-blur-sm transition-shadow duration-300 hover:shadow-[0_1px_2px_rgba(25,40,55,0.05),0_16px_40px_-14px_rgba(25,40,55,0.18)] sm:p-6',
+        className,
+      )}
       {...rest}
     >
       {children}
@@ -29,7 +32,7 @@ export function PageHeader({ title, description, actions }: { title: string; des
   return (
     <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="font-heading text-[clamp(1.6rem,3vw,2.2rem)] leading-tight">{title}</h1>
         {description ? <p className="mt-1 max-w-2xl text-sm text-fg-muted">{description}</p> : null}
       </div>
       {actions ? <div className="flex gap-2">{actions}</div> : null}
@@ -39,23 +42,23 @@ export function PageHeader({ title, description, actions }: { title: string; des
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
 const variants: Record<Variant, string> = {
-  primary: 'bg-accent text-white hover:bg-accent-strong disabled:bg-accent/40',
-  secondary: 'border border-line-strong bg-surface-3 text-fg hover:border-accent/60 disabled:opacity-50',
+  primary: 'bg-accent text-white shadow-[0_6px_18px_-6px_rgba(115,66,226,0.55)] hover:bg-accent-strong hover:-translate-y-px disabled:bg-accent/40 disabled:shadow-none disabled:translate-y-0',
+  secondary: 'border border-line-strong bg-white text-fg hover:border-accent/60 hover:text-accent disabled:opacity-50',
   ghost: 'text-fg-muted hover:text-fg hover:bg-surface-3',
-  danger: 'bg-loss/90 text-white hover:bg-loss disabled:opacity-50',
+  danger: 'bg-loss text-white hover:brightness-110 disabled:opacity-50',
 };
 
 export function Button({ variant = 'primary', className, ...rest }: ComponentProps<'button'> & { variant?: Variant }) {
   return (
     <button
-      className={clsx('inline-flex h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors disabled:cursor-not-allowed', variants[variant], className)}
+      className={clsx('inline-flex h-10 items-center justify-center gap-2 rounded-full px-5 text-sm font-medium transition-all duration-200 active:scale-[0.98] disabled:cursor-not-allowed', variants[variant], className)}
       {...rest}
     />
   );
 }
 
 export function ButtonLink({ variant = 'primary', className, ...rest }: ComponentProps<typeof Link> & { variant?: Variant }) {
-  return <Link className={clsx('inline-flex h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors', variants[variant], className)} {...rest} />;
+  return <Link className={clsx('inline-flex h-10 items-center justify-center gap-2 rounded-full px-5 text-sm font-medium transition-all duration-200 active:scale-[0.98]', variants[variant], className)} {...rest} />;
 }
 
 export function Field({ label, hint, error, htmlFor, children }: { label: string; hint?: ReactNode; error?: string | null; htmlFor: string; children: ReactNode }) {
@@ -77,7 +80,7 @@ export function Field({ label, hint, error, htmlFor, children }: { label: string
 }
 
 const inputCls =
-  'h-10 w-full rounded-lg border border-line bg-bg/60 px-3 text-sm text-fg placeholder:text-fg-subtle focus:border-accent focus:outline-none aria-[invalid=true]:border-loss';
+  'h-11 w-full rounded-xl border border-line bg-white px-3.5 text-sm text-fg placeholder:text-fg-subtle transition-shadow focus:border-accent focus:outline-none focus:ring-4 focus:ring-accent/10 aria-[invalid=true]:border-loss';
 
 export function Input(props: ComponentProps<'input'>) {
   return <input {...props} className={clsx(inputCls, props.className)} />;
@@ -120,7 +123,7 @@ export function SimulatedBadge() {
 export function Notice({ tone = 'info', title, children }: { tone?: Tone; title?: string; children: ReactNode }) {
   const border = { neutral: 'border-line', info: 'border-info/40', success: 'border-gain/40', warn: 'border-warn/40', danger: 'border-loss/40', sim: 'border-sim/40' }[tone];
   return (
-    <div role={tone === 'danger' ? 'alert' : 'status'} className={clsx('rounded-lg border bg-surface/70 px-4 py-3 text-sm', border)}>
+    <div role={tone === 'danger' ? 'alert' : 'status'} className={clsx('rounded-2xl border bg-white/80 px-4 py-3 text-sm', border)}>
       {title ? <p className="mb-0.5 font-medium text-fg">{title}</p> : null}
       <div className="text-fg-muted">{children}</div>
     </div>
@@ -129,7 +132,7 @@ export function Notice({ tone = 'info', title, children }: { tone?: Tone; title?
 
 export function EmptyState({ title, children, action }: { title: string; children?: ReactNode; action?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-line px-6 py-10 text-center">
+    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-line-strong bg-surface-2/60 px-6 py-10 text-center">
       <p className="text-sm font-medium text-fg">{title}</p>
       {children ? <div className="mt-1 max-w-sm text-sm text-fg-muted">{children}</div> : null}
       {action ? <div className="mt-4">{action}</div> : null}
@@ -154,7 +157,7 @@ export function Table({ head, children, empty }: { head: ReactNode[]; children: 
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-line/60">{children}</tbody>
+        <tbody className="divide-y divide-line/70 [&>tr]:transition-colors [&>tr:hover]:bg-accent/[0.03]">{children}</tbody>
       </table>
       {empty}
     </div>

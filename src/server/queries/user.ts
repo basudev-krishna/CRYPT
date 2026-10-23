@@ -419,3 +419,27 @@ export async function listNotifications(db: Db, userId: string, limit = 20) {
     [userId, limit],
   );
 }
+
+export interface MembershipView {
+  memberCode: string;
+  sponsorMemberCode: string | null;
+  /** Members this user vouched for. Member ids only: other members' emails are never shown. */
+  sponsored: { memberCode: string; joinedAt: Date }[];
+}
+
+export async function getMembership(db: Db, userId: string): Promise<MembershipView | null> {
+  const r = await maybeOne<{ member_code: string; sponsor_code: string | null }>(
+    db,
+    `select p.member_code, s.member_code as sponsor_code
+       from public.user_profiles p left join public.user_profiles s on s.user_id = p.sponsor_user_id
+      where p.user_id = $1`,
+    [userId],
+  );
+  if (!r) return null;
+  const sponsored = await many<{ member_code: string; created_at: Date }>(
+    db,
+    'select member_code, created_at from public.user_profiles where sponsor_user_id = $1 order by created_at',
+    [userId],
+  );
+  return { memberCode: r.member_code, sponsorMemberCode: r.sponsor_code, sponsored: sponsored.map((s) => ({ memberCode: s.member_code, joinedAt: s.created_at })) };
+}

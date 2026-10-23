@@ -147,3 +147,17 @@ export async function currentPolicy<K extends PolicyKind>(db: Db, kind: K): Prom
 export function bigintReplacer(_key: string, value: unknown): unknown {
   return typeof value === 'bigint' ? value.toString() : value;
 }
+
+/**
+ * True when `userId` is the only administrator. Four-eyes rules cannot be met
+ * then, so they fall back to a self-review that is always alerted. Adding a
+ * second administrator restores the stricter rule automatically.
+ */
+export async function isSoleAdmin(db: Db, userId: string): Promise<boolean> {
+  const r = await one<{ n: number; me: boolean | null }>(
+    db,
+    "select count(*)::int as n, bool_or(user_id = $1) as me from public.staff_roles where role = 'admin'",
+    [userId],
+  );
+  return r.n === 1 && r.me === true;
+}

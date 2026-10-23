@@ -1,3 +1,5 @@
+import { redirect } from 'next/navigation';
+import { serverEnv } from '@/server/env';
 import type { Metadata } from 'next';
 import { pageUser } from '@/server/http/auth';
 import { webDb } from '@/server/db';
@@ -14,6 +16,8 @@ import { fmt } from '@/components/ui/money';
 export const metadata: Metadata = { title: 'Portfolio & performance' };
 
 export default async function PortfolioPage() {
+  // Group mode has no investment pool.
+  if (serverEnv().GROUP_MODE) redirect('/dashboard');
   const user = await pageUser();
   const db = webDb();
   const [d, series, allocations, orders] = await Promise.all([getDashboard(db, user.id), getUserSeries(db, user.id, 180), listAllocations(db, user.id), listOrders(db, user.id)]);

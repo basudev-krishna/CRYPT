@@ -12,7 +12,11 @@ export const PERMISSIONS = {
   'deposit.investigate': ['admin', 'operations', 'compliance'],
   'withdrawal.review': ['admin', 'compliance'],
   'withdrawal.hold': ['admin', 'compliance'],
+  'withdrawal.payout': ['admin'], // records a manually signed payout, or declines it
+  'deposit.allocate': ['admin'], // assign, distribute or correct group-wallet receipts
   'user.restrict': ['admin', 'compliance'],
+  'user.approve': ['admin'], // new sign-ups wait for an administrator
+  'member.invite': ['admin'], // membership is admin-controlled; also covers revoking
   'risk.resolve': ['admin', 'compliance'],
   'control.pause': ['admin', 'operations', 'compliance'], // anyone on duty can stop payouts
   'control.resume': ['admin'], // resuming is exceptional; see canResume()
@@ -27,11 +31,23 @@ export function can(roles: readonly StaffRole[], permission: Permission): boolea
   return roles.some((r) => allowed.includes(r));
 }
 
+/** How long a sole administrator must wait before resuming a pause they enabled themselves. */
+export const SOLE_ADMIN_RESUME_COOLDOWN_MS = 60 * 60_000;
+
 /**
  * Four-eyes rule for resuming after an emergency pause: the admin resuming
- * must not be the person who paused (automatic system pauses excepted).
+ * must not be the person who paused (automatic system pauses excepted). A sole
+ * administrator has nobody else, so they may resume their own pause after a
+ * cooling-off period; the route alerts on it.
  */
-export function canResume(roles: readonly StaffRole[], staffUserId: string, pausedBy: string): boolean {
+export function canResume(
+  roles: readonly StaffRole[],
+  staffUserId: string,
+  pausedBy: string,
+  opts: { soleAdmin?: boolean; pausedAt?: Date; now?: Date } = {},
+): boolean {
   if (!can(roles, 'control.resume')) return false;
-  return pausedBy !== `staff:${staffUserId}`;
+  if (pausedBy !== `staff:${staffUserId}`) return true;
+  if (!opts.soleAdmin || !opts.pausedAt) return false;
+  return (opts.now ?? new Date()).getTime() - opts.pausedAt.getTime() >= SOLE_ADMIN_RESUME_COOLDOWN_MS;
 }

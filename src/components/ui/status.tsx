@@ -51,6 +51,7 @@ export const OrderStatus = make(ORDER);
 export const EVENT_LABELS: Record<string, string> = {
   deposit_received: 'Deposit received',
   deposit_credit: 'Deposit credited',
+  deposit_allocated: 'Credited by administrator',
   subscription_requested: 'Investment requested',
   subscription_executed: 'Investment executed',
   subscription_cancelled: 'Investment cancelled',

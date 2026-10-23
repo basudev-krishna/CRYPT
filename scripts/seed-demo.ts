@@ -69,6 +69,8 @@ async function main() {
         console.log(`exists  ${u.email}`);
       }
       await admin.query('update auth.users set email_confirmed_at = coalesce(email_confirmed_at, now()) where id = $1', [user.id]);
+      // Demo accounts skip the admin approval queue.
+      await admin.query("update public.user_profiles set account_status = 'active', reviewed_at = coalesce(reviewed_at, now()) where user_id = $1 and account_status = 'pending_approval'", [user.id]);
       await admin.query(
         `insert into public.kyc_records (user_id, status, full_name, country_code, document_type, document_last4, submitted_at, review_notes)
          select $1, 'approved', 'Demo User', 'GB', 'passport', 'DEMO', now(), 'Seeded for local demo'

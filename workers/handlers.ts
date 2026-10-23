@@ -13,6 +13,7 @@ import { importTrades, runValuation } from '../src/server/investment/valuation';
 import { getPool } from '../src/server/investment/orders';
 import { expireUnconfirmed, listOpenWithdrawalIds, monitorWithdrawal, processWithdrawal, type PayoutDeps } from '../src/server/withdrawals/service';
 import { runReconciliation, sweepDeposits } from '../src/server/treasury/reconciliation';
+import { failCorrection, listPendingAllocationIds, listPendingCorrectionIds, postAllocation, postCorrection } from '../src/server/deposits/allocations';
 import { notify, raiseRiskEvent, serviceActor } from '../src/server/ops';
 import { dispatchRiskAlerts, getAlertSender } from '../src/server/alerts';
 import type { JobPayloads } from '../src/server/jobs/queues';
@@ -54,6 +55,22 @@ export function createHandlers(pool: pg.Pool, enqueue: Enqueue, env: NodeJS.Proc
 
     async depositInvestigate({ networkId, txHash, requestedBy }: JobPayloads['deposit.investigate']) {
       await withTransaction(pool, async (db) => investigateTransaction(db, await adapterFor(networkId, db), txHash, { type: 'staff', id: requestedBy }));
+    },
+
+    async allocationPost({ allocationId }: JobPayloads['allocation.post']) {
+      await withTransaction(pool, (db) => postAllocation(db, allocationId, serviceActor('allocation-poster')));
+    },
+
+    /** A reversal the ledger refuses (e.g. the member already spent the cash) is recorded as failed, not retried forever. */
+    async correctionPost({ correctionId }: JobPayloads['correction.post']) {
+      try {
+        await withTransaction(pool, (db) => postCorrection(db, correctionId, serviceActor('correction-poster')));
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        // P0001/P0002: ledger rule violations (e.g. negative customer balance). Anything else is transient: retry.
+        if (code !== 'P0001' && code !== 'P0002') throw err;
+        await withTransaction(pool, (db) => failCorrection(db, correctionId, (err as Error).message));
+      }
     },
 
     async treasurySweep({ networkId }: JobPayloads['treasury.sweep']) {
@@ -119,6 +136,8 @@ export function createHandlers(pool: pg.Pool, enqueue: Enqueue, env: NodeJS.Proc
         for (const id of await listOpenWithdrawalIds(pool, 'reserved')) await enqueue('withdrawal.process', { withdrawalId: id }, { singletonKey: `process:${id}` });
         for (const id of await listOpenWithdrawalIds(pool, 'processing')) await enqueue('withdrawal.process', { withdrawalId: id }, { singletonKey: `process:${id}` });
         for (const id of await listOpenWithdrawalIds(pool, 'broadcast')) await enqueue('withdrawal.monitor', { withdrawalId: id }, { singletonKey: `monitor:${id}` });
+        for (const id of await listPendingAllocationIds(pool)) await enqueue('allocation.post', { allocationId: id }, { singletonKey: `allocation:${id}` });
+        for (const id of await listPendingCorrectionIds(pool)) await enqueue('correction.post', { correctionId: id }, { singletonKey: `correction:${id}` });
         await enqueue('notifications.dispatch', {}, { singletonKey: 'notifications' });
         await enqueue('ops.maintenance', {}, { singletonKey: 'maintenance' });
       } else if (kind === 'medium') {

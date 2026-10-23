@@ -11,6 +11,7 @@ import { maybeOne, one, type Db } from '../db-core';
 import { parseBase } from '@/lib/money';
 import type { CustodyProvider, DepositAddressResult, TransferRequest, TransferResult } from './types';
 import { CustodyUnavailableError } from './types';
+import { ManualCustodyProvider } from './manual';
 
 const SIM_GAS_FEE_WEI = 21_000n * 1_000_000_000n; // 21k gas at 1 gwei, in sETH base units
 
@@ -82,6 +83,7 @@ export class SimulatedCustodyProvider implements CustodyProvider {
 export function getCustodyProvider(db: Db, env: NodeJS.ProcessEnv = process.env): CustodyProvider {
   const name = env.CUSTODY_PROVIDER ?? 'simulated';
   if (name === 'simulated') return new SimulatedCustodyProvider(db);
+  if (name === 'manual') return new ManualCustodyProvider(db);
   // Real providers (e.g. Fireblocks, BitGo, Cobo, Liminal) are not integrated
   // yet. Refuse rather than silently falling back to the simulation.
   throw new CustodyUnavailableError(`Custody provider "${name}" is not integrated in this build`);

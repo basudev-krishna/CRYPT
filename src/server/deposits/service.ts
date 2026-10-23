@@ -17,7 +17,7 @@ import { many, maybeOne, one, type Db } from '../db-core';
 import { parseBase } from '@/lib/money';
 import { ensureAccount, postEntry, transfer } from '../ledger/ledger';
 import { getAccountStatus, getKycStatus, getScreeningProvider, type AddressScreeningProvider } from '../compliance/compliance';
-import { currentPolicy, isControlEnabled, notify, raiseRiskEvent, recordAudit, serviceActor, type Actor } from '../ops';
+import { currentPolicy, isControlEnabled, isSoleAdmin, notify, raiseRiskEvent, recordAudit, serviceActor, type Actor } from '../ops';
 import { findTokenByContract, getDepositToken, getNetwork } from '../chains/registry';
 import type { ChainAdapter, ObservedTransfer } from '../chains/types';
 import type { CustodyProvider } from '../custody/types';
@@ -40,7 +40,23 @@ export interface DepositInstructions {
   network: { id: number; code: string; name: string; isTestnet: boolean; isSimulated: boolean; requiredConfirmations: number };
   token: { id: number; symbol: string; contractAddress: string; decimals: number; isTestToken: boolean };
   address: string;
+  /**
+   * `group_wallet`: `address` is shared by every member and deposits are
+   * attributed by the sender, so the member must send from a registered wallet.
+   * `deposit_address`: `address` is this member's own.
+   */
+  mode: 'group_wallet' | 'deposit_address';
   minDepositBase: bigint;
+}
+
+/** The active shared wallet that accepts member deposits on a network, if any. */
+export async function getGroupWallet(db: Db, networkId: number): Promise<{ id: number; address: string } | null> {
+  const row = await maybeOne<{ id: number; address: string }>(
+    db,
+    'select id, address from public.treasury_wallets where network_id = $1 and receives_deposits and is_active order by id limit 1',
+    [networkId],
+  );
+  return row ? { id: Number(row.id), address: row.address } : null;
 }
 
 export async function getDepositInstructions(db: Db, custody: CustodyProvider, userId: string, networkId: number, actor: Actor): Promise<DepositInstructions> {
@@ -58,6 +74,21 @@ export async function getDepositInstructions(db: Db, custody: CustodyProvider, u
   if (policy.params.require_kyc_approved && (await getKycStatus(db, userId)) !== 'approved') {
     throw new DepositError('Identity verification must be approved before depositing', 'kyc_required');
   }
+
+  const networkInfo = {
+    id: network.id,
+    code: network.code,
+    name: network.name,
+    isTestnet: network.isTestnet,
+    isSimulated: network.family === 'simulated',
+    requiredConfirmations: network.requiredConfirmations,
+  };
+  const tokenInfo = { id: token.id, symbol: token.symbol, contractAddress: token.contractAddress, decimals: token.decimals, isTestToken: token.isTestToken };
+
+  // A group wallet needs no custody: the address is shared and watched, never signed for.
+  const group = await getGroupWallet(db, networkId);
+  if (group) return { network: networkInfo, token: tokenInfo, address: group.address, mode: 'group_wallet', minDepositBase: token.minDepositBase };
+
   if (!custody.supportsNetwork(network.code)) throw new DepositError('Custody is not configured for this network', 'custody_unavailable');
 
   let row = await maybeOne<{ address: string }>(
@@ -80,19 +111,7 @@ export async function getDepositInstructions(db: Db, custody: CustodyProvider, u
     await recordAudit(db, actor, 'deposit.address_issued', { type: 'deposit_address', id: row.address }, { networkId });
   }
 
-  return {
-    network: {
-      id: network.id,
-      code: network.code,
-      name: network.name,
-      isTestnet: network.isTestnet,
-      isSimulated: network.family === 'simulated',
-      requiredConfirmations: network.requiredConfirmations,
-    },
-    token: { id: token.id, symbol: token.symbol, contractAddress: token.contractAddress, decimals: token.decimals, isTestToken: token.isTestToken },
-    address: row.address,
-    minDepositBase: token.minDepositBase,
-  };
+  return { network: networkInfo, token: tokenInfo, address: row.address, mode: 'deposit_address', minDepositBase: token.minDepositBase };
 }
 
 // -----------------------------------------------------------------------------
@@ -126,26 +145,24 @@ export async function recordInboundTransfer(
       t.logIndex,
     ]));
 
-  const address = await maybeOne<{ id: string; user_id: string }>(
-    db,
-    'select id, user_id from public.deposit_addresses where network_id = $1 and address = $2',
-    [networkId, t.to],
-  );
-  if (!address) return { depositId: null, isNew: false }; // not one of ours (e.g. treasury inbound)
+  const dest = await resolveDestination(db, networkId, t);
+  if (!dest) return { depositId: null, isNew: false }; // not one of ours, or an internal movement
 
   const unsupported = !token || token.isNative || token.status === 'disabled';
   const dep = await maybeOne<{ id: string }>(
     db,
     `insert into public.deposits
-       (user_id, network_id, token_id, deposit_address_id, chain_transaction_id, amount_base, status, status_reason, required_confirmations)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       (user_id, network_id, token_id, deposit_address_id, treasury_wallet_id, member_wallet_id, chain_transaction_id, amount_base, status, status_reason, required_confirmations)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      on conflict (chain_transaction_id) do nothing
      returning id`,
     [
-      address.user_id,
+      dest.userId,
       networkId,
       token?.id ?? null,
-      address.id,
+      dest.depositAddressId,
+      dest.treasuryWalletId,
+      dest.memberWalletId,
       chainTx.id,
       t.amount.toString(),
       unsupported ? 'recovery_required' : 'detected',
@@ -156,7 +173,7 @@ export async function recordInboundTransfer(
   if (dep) {
     if (unsupported) {
       await raiseRiskEvent(db, {
-        userId: address.user_id,
+        userId: dest.userId,
         kind: 'unsupported_token_deposit',
         severity: 'medium',
         subjectType: 'deposit',
@@ -164,7 +181,9 @@ export async function recordInboundTransfer(
         details: { tokenContract: t.tokenContract, txHash: t.txHash },
       });
     }
-    await notify(db, { userId: address.user_id, kind: 'deposit_detected', payload: { depositId: dep.id, txHash: t.txHash }, dedupeKey: `deposit_detected:${dep.id}` });
+    if (dest.userId) {
+      await notify(db, { userId: dest.userId, kind: 'deposit_detected', payload: { depositId: dep.id, txHash: t.txHash }, dedupeKey: `deposit_detected:${dep.id}` });
+    }
     return { depositId: dep.id, isNew: true };
   }
   const existing = await one<{ id: string; status: string; chain_status: string }>(
@@ -180,7 +199,7 @@ export async function recordInboundTransfer(
       [existing.id],
     );
     await raiseRiskEvent(db, {
-      userId: address.user_id,
+      userId: dest.userId,
       kind: 'deposit_reappeared_after_reorg',
       severity: 'high',
       subjectType: 'deposit',
@@ -191,7 +210,56 @@ export async function recordInboundTransfer(
   return { depositId: existing.id, isNew: false };
 }
 
-/** Scan new blocks for transfers to our deposit addresses. Returns the number of transfers seen. */
+interface Destination {
+  userId: string | null;
+  depositAddressId: string | null;
+  treasuryWalletId: number | null;
+  memberWalletId: string | null;
+}
+
+/** The member's active registered wallet that sent a transfer, if any. */
+async function senderWallet(db: Db, networkId: number, from: string): Promise<{ id: string; user_id: string } | null> {
+  return maybeOne<{ id: string; user_id: string }>(
+    db,
+    "select id, user_id from public.member_wallets where network_id = $1 and address = $2 and status = 'active'",
+    [networkId, from.toLowerCase()],
+  );
+}
+
+/**
+ * Who a transfer is for. A per-user deposit address names its owner. A transfer
+ * to the group wallet belongs to whoever registered the sending wallet, or to
+ * nobody yet (user null) if the sender is unknown.
+ */
+async function resolveDestination(db: Db, networkId: number, t: ObservedTransfer): Promise<Destination | null> {
+  const address = await maybeOne<{ id: string; user_id: string }>(
+    db,
+    'select id, user_id from public.deposit_addresses where network_id = $1 and address = $2',
+    [networkId, t.to],
+  );
+  if (address) return { userId: address.user_id, depositAddressId: address.id, treasuryWalletId: null, memberWalletId: null };
+
+  const group = await maybeOne<{ id: number }>(
+    db,
+    'select id from public.treasury_wallets where network_id = $1 and address = $2 and receives_deposits',
+    [networkId, t.to],
+  );
+  if (!group) return null; // e.g. a sweep into the hot wallet
+
+  // Movements between platform wallets (sweeps, rebalancing) are not deposits.
+  const internal = await maybeOne<{ x: number }>(
+    db,
+    `select 1 as x from public.treasury_wallets where network_id = $1 and address = $2
+     union all select 1 from public.deposit_addresses where network_id = $1 and address = $2 limit 1`,
+    [networkId, t.from],
+  );
+  if (internal) return null;
+
+  const sender = await senderWallet(db, networkId, t.from);
+  return { userId: sender?.user_id ?? null, depositAddressId: null, treasuryWalletId: Number(group.id), memberWalletId: sender?.id ?? null };
+}
+
+/** Scan new blocks for transfers to our deposit addresses and group wallets. Returns the number of transfers seen. */
 export async function ingestNetwork(db: Db, adapter: ChainAdapter, opts: { initialLookback?: bigint; maxBlocks?: bigint } = {}): Promise<number> {
   const network = adapter.network;
   const token = await getDepositToken(db, network.id);
@@ -209,7 +277,14 @@ export async function ingestNetwork(db: Db, adapter: ChainAdapter, opts: { initi
   const maxBlocks = opts.maxBlocks ?? 10_000n;
   const to = head - from > maxBlocks ? from + maxBlocks : head;
 
-  const recipients = (await many<{ address: string }>(db, 'select address from public.deposit_addresses where network_id = $1', [network.id])).map((r) => r.address);
+  const recipients = (
+    await many<{ address: string }>(
+      db,
+      `select address from public.deposit_addresses where network_id = $1
+       union select address from public.treasury_wallets where network_id = $1 and receives_deposits and is_active`,
+      [network.id],
+    )
+  ).map((r) => r.address);
   let seen = 0;
   for (let i = 0; i < recipients.length; i += 500) {
     const transfers = await adapter.scanTransfers({ tokenContract: token.contractAddress, recipients: recipients.slice(i, i + 500), fromBlock: from, toBlock: to });
@@ -246,12 +321,13 @@ interface DepositRow {
   from_address: string;
   credit_entry_id: string | null;
   suspense_entry_id: string | null;
+  treasury_wallet_id: number | null;
 }
 
 const DEPOSIT_SELECT = `
   select d.id, d.user_id, d.network_id, d.token_id, d.amount_base::text, d.status, d.required_confirmations,
          d.chain_transaction_id, c.tx_hash, c.log_index, c.to_address, c.token_contract, c.block_hash, c.from_address,
-         d.credit_entry_id, d.suspense_entry_id
+         d.credit_entry_id, d.suspense_entry_id, d.treasury_wallet_id
     from public.deposits d join public.chain_transactions c on c.id = d.chain_transaction_id`;
 
 async function loadDeposit(db: Db, id: string, lock = false): Promise<DepositRow> {
@@ -388,12 +464,36 @@ export async function creditDeposit(
   const actor = serviceActor('deposit-crediter');
   const d = await loadDeposit(db, depositId, true);
   if (d.status !== 'confirmed') return 'unchanged';
-  if (d.token_id === null || d.user_id === null) return 'unchanged';
+  if (d.token_id === null) return 'unchanged';
   const tokenId = Number(d.token_id);
-  const userId = d.user_id;
 
+  // Confirmed funds are in the wallet whoever they belong to, so the receipt is
+  // always booked; only the credit to a member depends on attribution.
   await postReceive(db, d, tokenId);
   if (await isControlEnabled(db, 'deposits_paused')) return 'deferred';
+
+  let userId = d.user_id;
+  if (userId === null && d.treasury_wallet_id !== null) {
+    // The sender may have registered their wallet after sending.
+    const sender = await senderWallet(db, Number(d.network_id), d.from_address);
+    if (sender) {
+      await db.query('update public.deposits set user_id = $2, member_wallet_id = $3 where id = $1 and user_id is null', [d.id, sender.user_id, sender.id]);
+      userId = sender.user_id;
+    }
+  }
+  if (userId === null) {
+    // Nobody to credit: hold in suspense until an admin allocates it.
+    await db.query("update public.deposits set status = 'under_review', status_reason = 'unattributed' where id = $1", [d.id]);
+    await raiseRiskEvent(db, {
+      kind: 'deposit_unattributed',
+      severity: 'low',
+      subjectType: 'deposit',
+      subjectId: d.id,
+      details: { txHash: d.tx_hash, from: d.from_address, amountBase: d.amount_base },
+    });
+    await notify(db, { audience: 'operations', kind: 'deposit_unattributed', payload: { depositId: d.id } });
+    return 'under_review';
+  }
 
   const policy = await currentPolicy(db, 'deposit');
   const token = await one<{ min_deposit_base: string; code: string }>(
@@ -443,7 +543,10 @@ export async function reviewDeposit(db: Db, depositId: string, decision: 'approv
   const d = await loadDeposit(db, depositId, true);
   if (d.status !== 'under_review') throw new DepositError('Deposit is not under review', 'invalid_state');
   if (d.token_id === null || d.user_id === null) throw new DepositError('Deposit cannot be attributed', 'invalid_state');
-  if (actor.type === 'staff' && actor.id === d.user_id) throw new DepositError('Staff cannot review their own deposit', 'conflict_of_interest');
+  if (actor.type === 'staff' && actor.id === d.user_id) {
+    if (!(await isSoleAdmin(db, actor.id))) throw new DepositError('Staff cannot review their own deposit', 'conflict_of_interest');
+    await raiseRiskEvent(db, { userId: d.user_id, kind: 'admin_self_review', severity: 'high', subjectType: 'deposit', subjectId: d.id, details: { decision, note } });
+  }
 
   if (decision === 'reject') {
     await db.query("update public.deposits set status = 'recovery_required', status_reason = $2 where id = $1", [d.id, `rejected: ${note}`]);

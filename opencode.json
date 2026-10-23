@@ -1,0 +1,22 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama Local",
+      "options": {
+        "baseURL": "http://localhost:11434/v1"
+      },
+      "models": {
+        "thirdeyeai/Qwen2.5-Coder-7B-Instruct-Uncensored:Q4_0": {
+          "name": "Qwen2.5 Coder Uncensored",
+          "limit": {
+            "context": 4096,
+            "output": 2048
+          }
+        }
+      }
+    }
+  },
+  "model": "ollama/thirdeyeai/Qwen2.5-Coder-7B-Instruct-Uncensored:Q4_0"
+}

@@ -331,7 +331,7 @@ export function MfaEnroll({ enrolled }: { enrolled: boolean }) {
           <img src={factor.qr} alt="Authenticator QR code" width={200} height={200} className="rounded-lg bg-white p-2" />
           <div className="space-y-3">
             <p className="text-sm text-fg-muted">Scan the QR code, or enter this key manually:</p>
-            <code className="block break-all rounded bg-bg/70 px-2 py-1 font-mono text-xs" data-testid="totp-secret">
+            <code className="block break-all rounded-lg bg-surface-3 px-2.5 py-1.5 font-mono text-xs" data-testid="totp-secret">
               {factor.secret}
             </code>
             <Field label="6-digit code" htmlFor="totp-code">

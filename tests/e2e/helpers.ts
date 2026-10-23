@@ -15,21 +15,22 @@ export const adminDb = () => new pg.Pool({ connectionString: localUrl('DATABASE_
 
 export const PASSWORD = 'E2e-Test-Password-1234';
 
-/** Sign up through Supabase Auth (local), then confirm the email directly in the local DB. */
+/** Sign up through Supabase Auth (local), then confirm the email and approve the account directly in the local DB. */
 export async function createConfirmedUser(db: pg.Pool, opts: { kyc?: boolean } = {}): Promise<{ id: string; email: string }> {
   const supabase = createClient(localUrl('NEXT_PUBLIC_SUPABASE_URL'), process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false } });
   const email = `${randomUUID().slice(0, 8)}@e2e.test.local`;
   const { data, error } = await supabase.auth.signUp({ email, password: PASSWORD });
   if (error || !data.user) throw new Error(`signUp failed: ${error?.message}`);
   await db.query('update auth.users set email_confirmed_at = now() where id = $1', [data.user.id]);
+  await db.query("update public.user_profiles set account_status = 'active', reviewed_at = now() where user_id = $1", [data.user.id]);
   if (opts.kyc) await db.query("insert into public.kyc_records (user_id, status, full_name, submitted_at) values ($1, 'approved', 'E2E User', now())", [data.user.id]);
   return { id: data.user.id, email };
 }
 
 export async function login(page: Page, email: string) {
   await page.goto('/login');
-  await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Password').fill(PASSWORD);
+  await page.getByLabel('Username or email').fill(email);
+  await page.getByLabel('Password', { exact: true }).fill(PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
 }
@@ -37,6 +38,22 @@ export async function login(page: Page, email: string) {
 export async function cleanupE2eUsers(db: pg.Pool) {
   // Rows referencing auth.users use ON DELETE RESTRICT; remove dependents first (local test data only).
   const ids = (await db.query("select id from auth.users where email like '%@e2e.test.local'")).rows.map((r) => r.id as string);
+  // Invitations are append-only; local cleanup bypasses that guard (superuser, replica mode) for test rows only.
+  const client = await db.connect();
+  try {
+    await client.query('begin');
+    await client.query('set local session_replication_role = replica');
+    await client.query(
+      "delete from public.member_invitations where email like '%@e2e.test.local' or accepted_user_id = any($1::uuid[]) or sponsor_user_id = any($1::uuid[])",
+      [ids],
+    );
+    await client.query('commit');
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
   if (!ids.length) return;
   for (const t of ['withdrawal_destinations', 'withdrawal_requests', 'investment_orders', 'investment_positions', 'kyc_records', 'notification_events', 'risk_events', 'deposit_addresses', 'staff_roles']) {
     await db.query(`delete from public.${t} where user_id = any($1::uuid[])`, [ids]);

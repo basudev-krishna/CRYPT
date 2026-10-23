@@ -29,7 +29,7 @@ import { many, maybeOne, one, withTransaction, type Db } from '../db-core';
 import { parseBase, parseUnits } from '@/lib/money';
 import { cachedBalance, ensureAccount, lockBalance, postEntry, transfer } from '../ledger/ledger';
 import { getAccountStatus, getKycStatus, type AddressScreeningProvider } from '../compliance/compliance';
-import { currentPolicy, isControlEnabled, notify, raiseRiskEvent, recordAudit, serviceActor, setControl, type Actor } from '../ops';
+import { currentPolicy, isControlEnabled, isSoleAdmin, notify, raiseRiskEvent, recordAudit, serviceActor, setControl, type Actor } from '../ops';
 import { getDepositToken, getNetwork, getToken } from '../chains/registry';
 import type { ChainAdapter } from '../chains/types';
 import { CustodyUnavailableError, type CustodyProvider } from '../custody/types';
@@ -479,11 +479,18 @@ export async function monitorWithdrawal(pool: pg.Pool, deps: PayoutDeps, withdra
     chainStatus = lookup.status;
     if (lookup.status === 'success' || lookup.status === 'failed') confirmations = lookup.confirmations;
     // A successful receipt only settles the withdrawal if it actually moved the
-    // net amount of the withdrawn token to the requested destination.
+    // net amount of the withdrawn token from our hot wallet to the requested
+    // destination. (With manual custody the hash is typed in by a person, so a
+    // transfer from some other wallet must never count as our payout.)
     if (lookup.status === 'success') {
       const net = parseBase(snapshot.net_amount_base);
+      const from = (await hotWallet(pool, network.id)).toLowerCase();
       paysDestination = lookup.transfers.some(
-        (t) => t.tokenContract === token.contractAddress?.toLowerCase() && t.to === snapshot.destination_address.toLowerCase() && t.amount === net,
+        (t) =>
+          t.tokenContract === token.contractAddress?.toLowerCase() &&
+          t.from === from &&
+          t.to === snapshot.destination_address.toLowerCase() &&
+          t.amount === net,
       );
     }
   }
@@ -565,7 +572,10 @@ export async function reviewWithdrawal(db: Db, args: { withdrawalId: string; dec
   if (args.note.trim().length < 10) throw new WithdrawalError('A review note of at least 10 characters is required', 'note_required');
   const w = await one<WRow>(db, `select ${W_COLS} from public.withdrawal_requests where id = $1 for update`, [args.withdrawalId]);
   if (w.status !== 'reserved') throw new WithdrawalError(`Withdrawal is ${w.status}`, 'invalid_state');
-  if (w.user_id === args.staffUserId) throw new WithdrawalError('Staff cannot review their own withdrawal', 'conflict_of_interest');
+  if (w.user_id === args.staffUserId) {
+    if (!(await isSoleAdmin(db, args.staffUserId))) throw new WithdrawalError('Staff cannot review their own withdrawal', 'conflict_of_interest');
+    await raiseRiskEvent(db, { userId: w.user_id, kind: 'admin_self_review', severity: 'high', subjectType: 'withdrawal', subjectId: w.id, details: { decision: args.decision, note: args.note } });
+  }
   if (args.decision === 'approve') {
     await db.query('update public.withdrawal_requests set reviewed_by = $2, reviewed_at = now() where id = $1', [w.id, args.staffUserId]);
   } else {

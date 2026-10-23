@@ -4,7 +4,8 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { supabaseServer } from './supabase';
 import { webDb } from '../db';
-import { many } from '../db-core';
+import { many, maybeOne } from '../db-core';
+import type { AccountStatus } from '../compliance/compliance';
 import type { Actor } from '../ops';
 import { can, type Permission, type StaffRole } from '../permissions';
 
@@ -17,6 +18,8 @@ export interface SessionUser {
   aal: 'aal1' | 'aal2';
   hasMfaFactor: boolean;
   roles: StaffRole[];
+  /** Null only if the profile row is missing, which is treated like pending. */
+  accountStatus: AccountStatus | null;
 }
 
 export class AuthError extends Error {
@@ -40,7 +43,10 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user) return null;
   const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-  const roles = await many<{ role: StaffRole }>(webDb(), 'select role from public.staff_roles where user_id = $1', [data.user.id]);
+  const [roles, profile] = await Promise.all([
+    many<{ role: StaffRole }>(webDb(), 'select role from public.staff_roles where user_id = $1', [data.user.id]),
+    maybeOne<{ account_status: AccountStatus }>(webDb(), 'select account_status from public.user_profiles where user_id = $1', [data.user.id]),
+  ]);
   return {
     id: data.user.id,
     email: data.user.email ?? '',
@@ -48,6 +54,7 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
     aal: aal?.currentLevel === 'aal2' ? 'aal2' : 'aal1',
     hasMfaFactor: (data.user.factors ?? []).some((f) => f.status === 'verified'),
     roles: roles.map((r) => r.role),
+    accountStatus: profile?.account_status ?? null,
   };
 });
 
@@ -57,6 +64,11 @@ export async function requireUser(): Promise<SessionUser> {
   if (!user.emailVerified) throw new AuthError('Verify your email address first', 403, 'email_unverified');
   // A user who has enrolled MFA must complete it for every session.
   if (user.hasMfaFactor && user.aal !== 'aal2') throw new AuthError('Two-factor verification required', 401, 'mfa_required');
+  // New sign-ups wait for an administrator; fail closed if the profile is missing.
+  if (user.accountStatus === 'rejected') throw new AuthError('Your registration was not approved', 403, 'account_rejected');
+  if (user.accountStatus === 'pending_approval' || user.accountStatus === null) {
+    throw new AuthError('Your account is waiting for administrator approval', 403, 'account_pending_approval');
+  }
   return user;
 }
 
@@ -85,6 +97,7 @@ export async function pageUser(): Promise<SessionUser> {
     if (err instanceof AuthError) {
       if (err.code === 'mfa_required') redirect('/login/mfa');
       if (err.code === 'email_unverified') redirect('/login?notice=verify');
+      if (err.code === 'account_pending_approval' || err.code === 'account_rejected') redirect('/pending-approval');
       redirect('/login');
     }
     throw err;
