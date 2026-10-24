@@ -1,8 +1,8 @@
 # Production-readiness checklist
 
-**This build is testnet-only and is not production-ready.** `REAL_FUNDS_ENABLED` is hard-refused by both the web server (`src/server/env.ts`) and the worker (`workers/startup-guard.ts`). Mainnet networks cannot be activated, because the `mainnet_not_active` constraint blocks it. Simulated custody and trading refuse to operate on real networks.
+**This build is not production-ready.** Real funds are possible in one narrow shape only: private group mode on BNB Smart Chain, where the app watches the group wallet and holds no keys (2026-10-24, at the owner's direction, without the testnet rehearsal). `REAL_FUNDS_ENABLED=true` is refused by the web server (`src/server/env.ts`) and the worker (`workers/startup-guard.ts`) unless `APP_ENV=production`, `GROUP_MODE=true`, `CUSTODY_PROVIDER=manual`, `DEMO_MODE=false` and `RPC_URL_BSC_MAINNET` are all set. The `mainnet_allowlist` constraint lets only `bsc-mainnet` (chain 56) be activated. Simulated custody and trading still refuse real networks, and the investment pool stays off.
 
-Every item below must be complete and signed off before real funds are handled. Removing the guard is the **last** step, made in a reviewed change.
+The items below remain open. Anything beyond the group-wallet scope (pooled investment, a custody provider, other networks) still needs them signed off first.
 
 ## Independent reviews (mandatory)
 
@@ -27,7 +27,7 @@ Every item below must be complete and signed off before real funds are handled. 
 - [ ] Rate-limit source IP: set `TRUSTED_PROXY_HOPS` to match the real proxy chain and verify it in staging.
 - [ ] Secrets in a secret manager, rotated. Database role passwords must not be the `seed.sql` values.
 - [ ] MFA required for every customer at withdrawal (policy `require_mfa=true`) and for all staff (AAL2 is already enforced server-side). Consider WebAuthn.
-- [x] Monitoring and alerting on critical risk events, dead-lettered jobs, reconciliation discrepancies and automatic pauses. High/critical risk events go to Telegram (`src/server/alerts.ts`); the worker refuses to start in staging/production without it.
+- [x] Monitoring and alerting on critical risk events, dead-lettered jobs, reconciliation discrepancies and automatic pauses. High/critical risk events go by email (SMTP) and/or Telegram (`src/server/alerts.ts`); the worker refuses to start in staging/production without at least one channel.
 - [ ] Backups, point-in-time recovery, and tested restores.
 - [ ] Daily valuation frequency. The seeded allocation policy is hourly, for local demos only.
 
@@ -49,8 +49,9 @@ Decided 2026-10-24: no trading. Members deposit USDT into one group wallet the a
 - [ ] Manual payouts (`CUSTODY_PROVIDER=manual`, `/admin/withdrawals`): the admin sends from the group wallet and records the hash; it is checked on chain at entry (sender, recipient, token, exact net amount) and again before settlement. Declining releases the reservation.
 - [ ] Single administrator: no second approver exists, so transparency is the control. Every allocation, correction, manual payout, self-review and self-resume raises a high-severity risk event (Telegram), is audited, and shows in the affected member's history with its reason. The app cannot stop an administrator who holds the wallet keys from moving funds on chain; members can verify the wallet balance on the explorer, and reconciliation pauses withdrawals on any ledger/chain difference.
 - [ ] Investment pool off (`GROUP_MODE=true` hides portfolio/trading; `setup-staging.ts group-mode` inserts policy versions with `auto_subscribe=false` and KYC replaced by sign-up approval, and pauses pools).
-- [ ] Rehearse the full flow on BSC testnet with a test token and a testnet group wallet.
-- [ ] Go-live (separate, reviewed change): verified BSC USDT contract via migration, mainnet watch-only adapter for the group wallet only, then lift the guards.
+- [ ] Rehearse the full flow on BSC testnet with a test token and a testnet group wallet. **Skipped by the owner's decision; the first real deposits are the rehearsal. Start with small amounts.**
+- [x] Go-live change built (`20261024000300_bsc_mainnet_group_wallet.sql`, `phase-guard.ts`, `setup-staging.ts group-mode bsc-mainnet`): BSC USDT `0x55d398326f99059ff775485246999027b3197955` (Binance-Peg BSC-USD, 18 decimals; decimals re-checked on chain), mainnet adapter only while real funds are scoped, policies rewritten for 18 decimals and minimums of 50 USDT deposit / no withdrawal minimum, no withdrawal fee (`src/server/group-limits.ts`), other networks disabled, real-funds banner and disclosure (version `2026-10-24.live`, members must re-accept). Unit tests and build pass; `tests/integration/mainnet-allowlist.test.ts` not yet run.
+- Known gaps in real-funds mode: screening is still the mock (every sender passes unless on `SCREENING_BLOCKLIST`); there is one administrator, so no second approver; the DB role passwords shared in chat on 2026-10-23 were rotated by the owner on 2026-10-24.
 
 ## Open business decisions (block the related features)
 

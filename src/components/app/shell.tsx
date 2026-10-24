@@ -5,6 +5,7 @@ import { NavLink, type NavIcon } from './nav-link';
 import { MobileNav } from './mobile-nav';
 import { SignOutButton } from './sign-out-button';
 import { serverEnv } from '@/server/env';
+import { realFundsActive } from '@/server/phase-guard';
 
 type NavItem = { href: string; label: string; icon: NavIcon };
 
@@ -40,7 +41,9 @@ export function Logo() {
         <LogoMark size={26} />
       </span>
       <span className="text-base font-semibold tracking-tight">EliteWhale</span>
-      <span className="rounded-full border border-fg/20 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-fg-muted">testnet</span>
+      {realFundsActive() ? null : (
+        <span className="rounded-full border border-fg/20 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-fg-muted">testnet</span>
+      )}
     </Link>
   );
 }

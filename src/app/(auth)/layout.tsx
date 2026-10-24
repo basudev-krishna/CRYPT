@@ -1,12 +1,15 @@
 import { BadgeCheck, BookLock, ShieldCheck, Users } from 'lucide-react';
 import { Logo } from '@/components/app/shell';
+import { realFundsActive } from '@/server/phase-guard';
 
 // Factual product points only: no member counts, payout totals or return claims.
 const FEATURES = [
   { icon: BookLock, title: 'Ledger-backed balances', text: 'Every balance comes from a double-entry ledger you can audit.' },
   { icon: Users, title: 'Approved members', text: 'Each new account is reviewed by an administrator before use.' },
   { icon: ShieldCheck, title: 'Two-factor security', text: 'Authenticator-app codes protect sign-in and withdrawals.' },
-  { icon: BadgeCheck, title: 'Testnet only', text: 'A demonstration with test tokens. No real funds are accepted.' },
+  realFundsActive()
+    ? { icon: BadgeCheck, title: 'Real USDT', text: 'BEP20 USDT on BNB Smart Chain, in a group wallet the administrator controls.' }
+    : { icon: BadgeCheck, title: 'Testnet only', text: 'A demonstration with test tokens. No real funds are accepted.' },
 ];
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
@@ -18,7 +21,11 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         <div className="relative my-auto max-w-md py-12">
           <p className="text-xs font-medium uppercase tracking-[0.2em] text-accent">Welcome to EliteWhale</p>
           <h2 className="mt-3 text-4xl font-semibold leading-tight tracking-tight">A transparent, member-only investment ledger.</h2>
-          <p className="mt-4 text-sm text-fg-muted">Deposit test USDT, follow a pooled portfolio valued from real trade records, and withdraw under clear policy checks.</p>
+          <p className="mt-4 text-sm text-fg-muted">
+            {realFundsActive()
+              ? 'Deposit USDT from your registered wallet, see your share in an auditable ledger, and withdraw under clear policy checks.'
+              : 'Deposit test USDT, follow a pooled portfolio valued from real trade records, and withdraw under clear policy checks.'}
+          </p>
           <ul className="mt-10 grid gap-4 sm:grid-cols-2">
             {FEATURES.map(({ icon: Icon, title, text }) => (
               <li key={title} className="rounded-[var(--radius-card)] border border-line bg-surface-2/60 p-4">

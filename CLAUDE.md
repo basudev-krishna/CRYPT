@@ -4,17 +4,17 @@ Guide for agents and contributors working in this repository. Read [`docs/accoun
 
 ## What this is
 
-EliteWhale is a **testnet-only** USDT investment ledger: deposits → pooled investment valued from imported trade executions (unitized NAV) → policy-gated withdrawals. Custody, trading venue, screening and KYC are simulated or mocked.
+EliteWhale is a USDT investment ledger: deposits → pooled investment valued from imported trade executions (unitized NAV) → policy-gated withdrawals. It is testnet-only except for private group mode, which can run with real BSC USDT in a watch-only group wallet (`REAL_FUNDS_ENABLED`, see rule 1). Custody, trading venue, screening and KYC are otherwise simulated or mocked.
 
 ## Non-negotiable safety rules
 
-1. **Never enable real funds.** Don't weaken `src/server/phase-guard.ts`, `workers/startup-guard.ts`, the `mainnet_not_active` constraint, `AdapterNotAvailableError` for mainnets, or the simulated-only checks in custody and venue code. Don't add mainnet RPCs, production token contracts, private keys, seed phrases or real credentials.
+1. **Real funds only in their one supported scope.** Real USDT is allowed only in private group mode on BSC mainnet with manual custody (the app watches the group wallet and holds no keys); see `src/server/phase-guard.ts`. Don't widen that scope or weaken `phase-guard.ts`, `workers/startup-guard.ts`, the `mainnet_allowlist` constraint, `AdapterNotAvailableError` for other mainnets, or the simulated-only checks in custody and venue code. Don't add other mainnet RPCs or token contracts, private keys, seed phrases or real credentials.
 2. **Never write the ledger directly.** All balance changes go through `postEntry` (→ `ledger.post_entry`) with a deterministic business idempotency key. Corrections use `ledger.reverse_entry` with a documented reason. Never UPDATE or DELETE `journal_*`, and never add grants that allow it.
 3. **No floating point for money.** Use `bigint` base units and 18-dp fixed point (`src/lib/money.ts`). Parse user input with `parseUnits`, which rejects excess precision. Never call `Number()` or `parseFloat` on an amount.
 4. **Every financial write runs in one DB transaction** (`withTransaction` / `withWebTransaction`). Lock the payer balance (`lockBalance`) before checking it, and re-check limits under the lock.
 5. **Retries must be harmless.** Jobs, API requests and custody calls can run more than once. Use idempotency keys, unique constraints and `on conflict do nothing`, and reuse the same custody key on retry.
 6. **Fail closed.** If something is unknown (missing price, unreadable balance, screening down, stale reconciliation, custody/chain disagreement), hold or pause. Never approve, credit or settle on missing information.
-7. **Authorization is server-side.** Every route calls `requireUser` / `requirePermission(...)`. Customer queries filter by the session user id. Staff actions need the permission in `src/server/permissions.ts`, an AAL2 session, a documented note, an audit record, and no self-review. Exception: while there is exactly one administrator (`isSoleAdmin`), self-review of deposits/withdrawals and resuming one's own pause (after a 1-hour cooldown) are allowed, but each raises a high-severity risk event (Telegram). Adding a second admin restores four-eyes automatically. Admin allocations, corrections and manual payouts always raise one.
+7. **Authorization is server-side.** Every route calls `requireUser` / `requirePermission(...)`. Customer queries filter by the session user id. Staff actions need the permission in `src/server/permissions.ts`, an AAL2 session, a documented note, an audit record, and no self-review. Exception: while there is exactly one administrator (`isSoleAdmin`), self-review of deposits/withdrawals and resuming one's own pause (after a 1-hour cooldown) are allowed, but each raises a high-severity risk event (email/Telegram alert). Adding a second admin restores four-eyes automatically. Admin allocations, corrections and manual payouts always raise one.
 8. Never claim production readiness. See `docs/production-readiness.md`.
 
 ## Architecture map

@@ -1,6 +1,6 @@
 import 'server-only';
 import { z } from 'zod';
-import { assertDemoModeAllowed, assertRealFundsDisabled } from './phase-guard';
+import { assertDemoModeAllowed, assertRealFundsScope } from './phase-guard';
 
 const bool = z
   .enum(['true', 'false', '1', '0'])
@@ -26,7 +26,7 @@ let cached: ServerEnv | undefined;
 export function serverEnv(): ServerEnv {
   if (cached) return cached;
   // Checked on the raw environment first, so a malformed value cannot slip past the guard.
-  assertRealFundsDisabled(process.env);
+  assertRealFundsScope(process.env);
   assertDemoModeAllowed(process.env);
   const parsed = schema.safeParse(process.env);
   if (!parsed.success) {

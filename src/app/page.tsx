@@ -1,7 +1,9 @@
 import type { Metadata } from 'next';
 import { Hero } from '@/components/landing/hero';
 import { FactStrip, Faq, FinalCta, Footer, HowItWorks, NavExplainer, NetworksAndStatus, Pillars, Security, WithdrawalControls } from '@/components/landing/sections';
+import { redirect } from 'next/navigation';
 import { getSessionUser } from '@/server/http/auth';
+import { realFundsActive } from '@/server/phase-guard';
 
 export const metadata: Metadata = {
   title: { absolute: 'EliteWhale (Testnet) · Auditable USDT investment ledger' },
@@ -17,6 +19,8 @@ export const metadata: Metadata = {
 export default async function LandingPage() {
   const user = await getSessionUser().catch(() => null);
   const signedIn = !!user;
+  // A private group with real money has no public marketing page (it describes the testnet product).
+  if (realFundsActive()) redirect(signedIn ? '/dashboard' : '/login');
 
   return (
     <div className="landing" style={{ fontFamily: 'var(--font-body)', color: 'var(--color-text)', background: 'var(--color-login-bg)' }}>

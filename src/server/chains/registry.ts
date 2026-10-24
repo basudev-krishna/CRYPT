@@ -4,6 +4,7 @@
  */
 import { many, maybeOne, one, type Db } from '../db-core';
 import { parseBase } from '@/lib/money';
+import { REAL_FUNDS_NETWORKS, realFundsActive } from '../phase-guard';
 import { EvmChainAdapter } from './evm';
 import { SimulatedChainAdapter } from './simulated';
 import type { ChainAdapter, NetworkConfig, TokenConfig } from './types';
@@ -120,11 +121,14 @@ export const RPC_ENV: Record<string, string> = {
   'evm-sepolia': 'RPC_URL_EVM_SEPOLIA',
   'evm-anvil': 'RPC_URL_EVM_ANVIL',
   'bsc-testnet': 'RPC_URL_BSC_TESTNET',
+  'bsc-mainnet': 'RPC_URL_BSC_MAINNET',
 };
 
 export function getAdapter(network: NetworkConfig, db: Db, env: NodeJS.ProcessEnv = process.env): ChainAdapter {
-  if (!network.isTestnet) {
-    throw new AdapterNotAvailableError(`Mainnet adapters are disabled in this phase (${network.code})`);
+  // A mainnet adapter exists only for allowlisted networks, and only while real
+  // funds are switched on in their supported (watch-only group wallet) scope.
+  if (!network.isTestnet && !(realFundsActive(env) && REAL_FUNDS_NETWORKS[network.code] === network.chainId)) {
+    throw new AdapterNotAvailableError(`Mainnet adapters are disabled for ${network.code}`);
   }
   switch (network.family) {
     case 'simulated':

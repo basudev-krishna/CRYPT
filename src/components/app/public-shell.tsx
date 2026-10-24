@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { Logo } from './shell';
 import { getSessionUser } from '@/server/http/auth';
+import { realFundsActive } from '@/server/phase-guard';
 
 export async function PublicShell({ children }: { children: ReactNode }) {
   const user = await getSessionUser().catch(() => null);
@@ -24,7 +25,11 @@ export async function PublicShell({ children }: { children: ReactNode }) {
       </header>
       <main>{children}</main>
       <footer className="mt-24 flex flex-wrap justify-between gap-4 border-t border-line py-8 text-xs text-fg-subtle">
-        <p>Testnet demonstration software. Not an offer of investment services. No real funds are accepted.</p>
+        <p>
+          {realFundsActive()
+            ? 'Private members’ group. Not a licensed investment, banking or custody service. No return is promised.'
+            : 'Testnet demonstration software. Not an offer of investment services. No real funds are accepted.'}
+        </p>
         <div className="flex gap-4">
           <Link href="/disclosures" className="hover:text-fg">Risk disclosure</Link>
           <Link href="/support" className="hover:text-fg">Support</Link>

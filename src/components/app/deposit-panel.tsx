@@ -107,7 +107,13 @@ export function DepositPanel({ networks, demoMode }: { networks: NetworkOption[]
             title={ins.mode === 'group_wallet' ? '2. Send to the group wallet' : '2. Send tokens to this address'}
             action={
               <div className="flex gap-2">
-                {ins.network.isSimulated ? <Badge tone="sim">Simulated network</Badge> : <Badge tone="info">Testnet</Badge>}
+                {ins.network.isSimulated ? (
+                  <Badge tone="sim">Simulated network</Badge>
+                ) : ins.network.isTestnet ? (
+                  <Badge tone="info">Testnet</Badge>
+                ) : (
+                  <Badge tone="warn">Real funds · {ins.network.name}</Badge>
+                )}
                 {ins.token.isTestToken ? <Badge tone="warn">Test token · no value</Badge> : null}
               </div>
             }

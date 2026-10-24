@@ -179,7 +179,7 @@ export function RegisterForm({ email = '', referralCode = '' }: { email?: string
       <label className="flex items-start gap-2 text-sm text-fg-muted">
         <input type="checkbox" name="terms" className="mt-1" />
         <span>
-          I accept the terms and have read the <a href="/disclosures" className="text-accent hover:underline" target="_blank">risk disclosure</a>. This is a testnet demonstration and investing involves risk of loss.
+          I accept the terms and have read the <a href="/disclosures" className="text-accent hover:underline" target="_blank">risk disclosure</a>. Crypto transfers cannot be reversed and you can lose money.
         </span>
       </label>
       {fe.acceptTerms ? <p className="text-xs text-loss">{fe.acceptTerms}</p> : null}

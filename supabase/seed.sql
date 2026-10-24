@@ -7,8 +7,8 @@
 alter role app_web login password 'app_web_local_dev_only';
 alter role app_worker login password 'app_worker_local_dev_only';
 
--- Networks. Mainnets are present for architecture completeness but disabled; the
--- mainnet_not_active constraint prevents activating them in this phase.
+-- Networks. Mainnets are disabled; the mainnet_allowlist constraint lets only
+-- bsc-mainnet be activated (private group mode, see 20261024000300).
 insert into public.supported_networks (code, name, family, chain_id, is_testnet, required_confirmations, status, explorer_tx_url, address_format) values
   ('sim-evm',      'Simulated EVM (development)', 'simulated', null,     true,  3,  'active',   null, 'evm'),
   ('evm-sepolia',  'Ethereum Sepolia (testnet)',  'evm',       11155111, true,  12, 'disabled', 'https://sepolia.etherscan.io/tx/{hash}', 'evm'),
@@ -19,15 +19,21 @@ insert into public.supported_networks (code, name, family, chain_id, is_testnet,
   ('bsc-mainnet',  'BNB Smart Chain',             'evm',       56,       false, 15, 'disabled', 'https://bscscan.com/tx/{hash}', 'evm'),
   ('tron-mainnet', 'TRON',                        'tron',      null,     false, 20, 'disabled', 'https://tronscan.org/#/transaction/{hash}', 'tron');
 
--- Tokens. Only the simulated test token is seeded. Production USDT contracts are
--- intentionally NOT seeded: they must be verified against Tether's official
--- publication and added through a reviewed change (see docs/production-readiness.md).
+-- Tokens. The simulated test token, plus BSC USDT (disabled). The BSC contract
+-- is the one verified in migration 20261024000300; on a fresh local reset that
+-- migration runs before the networks exist, so it is repeated here.
 insert into public.supported_tokens (network_id, symbol, name, contract_address, decimals, is_native, is_test_token, status, min_deposit_base, min_withdrawal_base)
 select id, 'tUSDT', 'Test USDT (simulated, no value)', '0x00000000000000000000000000000000000057d7', 6, false, true, 'active', 50000000, 10000000
   from public.supported_networks where code = 'sim-evm';
 insert into public.supported_tokens (network_id, symbol, name, contract_address, decimals, is_native, is_test_token, status)
 select id, 'sETH', 'Simulated gas token', null, 18, true, true, 'active'
   from public.supported_networks where code = 'sim-evm';
+insert into public.supported_tokens (network_id, symbol, name, contract_address, decimals, is_native, is_test_token, status, min_deposit_base, min_withdrawal_base)
+select n.id, 'USDT', 'Tether USD (BSC-USD, BEP20)', '0x55d398326f99059ff775485246999027b3197955', 18, false, false, 'disabled',
+       50 * power(10::numeric, 18), 0
+  from public.supported_networks n
+ where n.code = 'bsc-mainnet'
+   and not exists (select 1 from public.supported_tokens t where t.network_id = n.id and t.contract_address = '0x55d398326f99059ff775485246999027b3197955');
 
 -- Treasury hot wallet on the simulated network.
 insert into public.treasury_wallets (network_id, kind, address, label, custody_provider, custody_ref)
