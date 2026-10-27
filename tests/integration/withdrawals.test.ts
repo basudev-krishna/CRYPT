@@ -60,6 +60,32 @@ const endCooldown = () => admin.query("update public.withdrawal_destinations set
 const status = async (id: string) => (await one<{ status: string }>(admin, 'select status from public.withdrawal_requests where id = $1', [id])).status;
 
 describe('withdrawals', () => {
+  it('requires a two-factor verified session to confirm only when the policy says so', async () => {
+    const u = await createUser();
+    await fundUser(u, '50');
+    const w = await request(u, '20');
+    // Each case runs under its own policy version inside a rolled-back transaction, so no policy leaks to other tests.
+    const confirmUnder = async (requireMfa: boolean) => {
+      const c = await admin.connect();
+      try {
+        await c.query('begin');
+        await c.query(
+          `insert into public.policy_versions (kind, version, params, change_note, created_by, approved_by)
+           select kind, version + 1, jsonb_set(params, '{require_mfa}', to_jsonb($1::boolean)), 'test', 'test', 'test'
+             from public.policy_versions where kind = 'withdrawal' order by effective_from desc, version desc limit 1`,
+          [requireMfa],
+        );
+        return await confirmWithdrawal(c, { userId: u, withdrawalId: w.id, mfaVerified: false, actor: actorFor(u) });
+      } finally {
+        await c.query('rollback');
+        c.release();
+      }
+    };
+    await expect(confirmUnder(true)).rejects.toMatchObject({ code: 'mfa_required' });
+    await expect(confirmUnder(false)).resolves.toBeDefined();
+    expect(await status(w.id)).toBe('pending_verification'); // both attempts were rolled back
+  });
+
   it('reserves, pays out once, settles with fee, and leaves 85 of 105 (spec example)', async () => {
     const u = await createUser();
     await fundUser(u, '105'); // 100 deposit + 5 allocated profit
@@ -67,7 +93,6 @@ describe('withdrawals', () => {
     expect(w.status).toBe('pending_verification');
     expect(w.fee).toBe(usdt('1'));
 
-    await expect(confirm(u, w.id, false)).rejects.toMatchObject({ code: 'mfa_required' });
     await confirm(u, w.id);
     expect(await balanceOf('user_cash', tokenId, u)).toBe(usdt('85'));
     expect(await balanceOf('user_reserved', tokenId, u)).toBe(usdt('20'));

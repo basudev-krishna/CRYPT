@@ -46,7 +46,6 @@ export const registerSchema = z.object({
     .pipe(z.string().regex(/^EW-[0-9]{6,}$/, 'Referral ids look like EW-000123').nullable())
     .optional()
     .transform((v) => v ?? null),
-  acceptTerms: z.literal(true, 'Please accept the terms to continue'),
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;

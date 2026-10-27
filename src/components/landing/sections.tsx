@@ -485,9 +485,6 @@ export function FinalCta({ signedIn }: { signedIn: boolean }) {
               {signedIn ? 'Open your dashboard' : 'Create testnet account'}
               <ArrowRightCircle size={18} aria-hidden />
             </Link>
-            <Link href="/disclosures" className="inline-flex items-center rounded-full px-6 py-3.5 text-sm font-semibold ring-1 ring-white/40 transition hover:bg-white/10">
-              Read the risk disclosure
-            </Link>
           </div>
         </div>
         <div className="pointer-events-none absolute -bottom-10 -right-10 opacity-15 sm:bottom-auto sm:right-14 sm:top-1/2 sm:-translate-y-1/2" aria-hidden>
@@ -524,7 +521,6 @@ const FOOTER_COLUMNS: { title: string; links: { label: string; href: string }[] 
     title: 'Help',
     links: [
       { label: 'Support & FAQ', href: '/support' },
-      { label: 'Risk disclosure', href: '/disclosures' },
     ],
   },
 ];

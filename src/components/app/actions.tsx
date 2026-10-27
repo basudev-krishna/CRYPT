@@ -179,32 +179,6 @@ export function RedeemForm({ poolId, freeUnits }: { poolId: number; freeUnits: s
   );
 }
 
-export function AcceptDisclosure({ version, accepted }: { version: string; accepted: boolean }) {
-  const router = useRouter();
-  const [checked, setChecked] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  if (accepted) return <Notice tone="success">You accepted this version of the risk disclosure.</Notice>;
-  return (
-    <div className="space-y-3">
-      <label className="flex items-start gap-2 text-sm">
-        <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} className="mt-1" />
-        <span>I have read and understood this risk disclosure, including that I may lose some or all of the amount invested and that returns are not guaranteed.</span>
-      </label>
-      <Button
-        disabled={!checked}
-        onClick={async () => {
-          const r = await apiPost('/api/disclosures/accept', { version });
-          if (r.ok) router.refresh();
-          else setErr(r.error ?? 'Failed');
-        }}
-      >
-        Accept disclosure
-      </Button>
-      {err ? <Notice tone="danger">{err}</Notice> : null}
-    </div>
-  );
-}
-
 export function ProfileForm({ displayName, countryCode }: { displayName: string | null; countryCode: string | null }) {
   const router = useRouter();
   const [name, setName] = useState(displayName ?? '');

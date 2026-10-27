@@ -81,18 +81,12 @@ export function DepositPanel({ networks, demoMode }: { networks: NetworkOption[]
         </div>
         {error ? (
           <div className="mt-4">
-            <Notice tone={error.code === 'kyc_required' || error.code === 'disclosure_required' ? 'warn' : 'danger'} title="Deposit unavailable">
+            <Notice tone={error.code === 'kyc_required' ? 'warn' : 'danger'} title="Deposit unavailable">
               {error.message}
               {error.code === 'kyc_required' ? (
                 <>
                   {' '}
                   <a className="text-accent hover:underline" href="/settings">Complete verification →</a>
-                </>
-              ) : null}
-              {error.code === 'disclosure_required' ? (
-                <>
-                  {' '}
-                  <a className="text-accent hover:underline" href="/disclosures">Review disclosure →</a>
                 </>
               ) : null}
             </Notice>

@@ -11,7 +11,6 @@ export async function PublicShell({ children }: { children: ReactNode }) {
       <header className="flex items-center justify-between py-5">
         <Logo />
         <nav className="flex items-center gap-1 text-sm">
-          <Link href="/disclosures" className="rounded-full px-3 py-2 text-fg-muted transition hover:bg-white hover:text-fg">Risk disclosure</Link>
           <Link href="/support" className="rounded-full px-3 py-2 text-fg-muted transition hover:bg-white hover:text-fg">FAQ</Link>
           {user ? (
             <Link href="/dashboard" className="rounded-full bg-accent px-4 py-2 font-medium text-white transition hover:-translate-y-px hover:bg-accent-strong">Open app</Link>
@@ -31,7 +30,6 @@ export async function PublicShell({ children }: { children: ReactNode }) {
             : 'Testnet demonstration software. Not an offer of investment services. No real funds are accepted.'}
         </p>
         <div className="flex gap-4">
-          <Link href="/disclosures" className="hover:text-fg">Risk disclosure</Link>
           <Link href="/support" className="hover:text-fg">Support</Link>
         </div>
       </footer>

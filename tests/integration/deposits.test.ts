@@ -42,9 +42,28 @@ async function depositRow() {
 }
 
 describe('deposit verification and crediting', () => {
-  it('requires approved KYC before issuing a deposit address', async () => {
+  it('requires approved KYC before issuing a deposit address only when the policy says so', async () => {
     const user = await createUser({ kyc: 'pending' });
-    await expect(addressFor(user)).rejects.toMatchObject({ code: 'kyc_required' });
+    const net = await getNetwork(worker, 'sim-evm');
+    // Each case runs under its own policy version inside a rolled-back transaction, so no policy leaks to other tests.
+    const withKycPolicy = async (required: boolean) => {
+      const c = await admin.connect();
+      try {
+        await c.query('begin');
+        await c.query(
+          `insert into public.policy_versions (kind, version, params, change_note, created_by, approved_by)
+           select kind, version + 1, jsonb_set(params, '{require_kyc_approved}', to_jsonb($1::boolean)), 'test', 'test', 'test'
+             from public.policy_versions where kind = 'deposit' order by effective_from desc, version desc limit 1`,
+          [required],
+        );
+        return await getDepositInstructions(c, new SimulatedCustodyProvider(c), user, net.id, actor);
+      } finally {
+        await c.query('rollback');
+        c.release();
+      }
+    };
+    await expect(withKycPolicy(true)).rejects.toMatchObject({ code: 'kyc_required' });
+    expect((await withKycPolicy(false)).address).toMatch(/^0x/);
   });
 
   it('does not credit until the required confirmations are reached, then credits exactly once', async () => {

@@ -16,9 +16,8 @@ const USER_NAV: NavItem[] = [
   { href: '/withdraw', label: 'Withdraw', icon: 'withdraw' },
   { href: '/transactions', label: 'Transactions', icon: 'transactions' },
   { href: '/referrals', label: 'Referrals', icon: 'referrals' },
-  { href: '/settings', label: 'Profile & verification', icon: 'profile' },
+  { href: '/settings', label: 'Profile', icon: 'profile' },
   { href: '/settings/security', label: 'Security', icon: 'security' },
-  { href: '/disclosures', label: 'Risk disclosures', icon: 'disclosures' },
   { href: '/support', label: 'Support & FAQ', icon: 'support' },
 ];
 

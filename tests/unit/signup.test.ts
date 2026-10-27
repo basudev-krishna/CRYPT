@@ -9,7 +9,6 @@ const valid = {
   countryCode: 'IN',
   password: 'Strong-Password-2026',
   referralCode: ' ew-000123 ',
-  acceptTerms: true,
 };
 
 describe('registerSchema', () => {
@@ -22,7 +21,6 @@ describe('registerSchema', () => {
       countryCode: 'IN',
       password: 'Strong-Password-2026',
       referralCode: 'EW-000123',
-      acceptTerms: true,
     });
   });
 
@@ -32,7 +30,7 @@ describe('registerSchema', () => {
     expect(registerSchema.parse(withoutReferral).referralCode).toBeNull();
   });
 
-  it('rejects bad usernames, phones, weak passwords, unknown formats and unaccepted terms', () => {
+  it('rejects bad usernames, phones, weak passwords and unknown formats', () => {
     for (const bad of [
       { username: 'abc' },
       { username: 'has space' },
@@ -45,7 +43,6 @@ describe('registerSchema', () => {
       { countryCode: 'India' },
       { referralCode: 'FRIEND' },
       { email: 'not-an-email' },
-      { acceptTerms: false },
     ]) {
       expect(registerSchema.safeParse({ ...valid, ...bad }).success, JSON.stringify(bad)).toBe(false);
     }

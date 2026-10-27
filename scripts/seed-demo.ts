@@ -24,7 +24,6 @@ import { SimulatedCustodyProvider } from '../src/server/custody/simulated';
 import { getDepositToken, getNetwork } from '../src/server/chains/registry';
 import { insertSimTransfer } from '../src/server/chains/simulated';
 import { parseUnits } from '../src/lib/money';
-import { RISK_DISCLOSURE_VERSION } from '../src/lib/disclosures';
 
 config({ path: ['.env.local', '.env'], quiet: true });
 configurePgTypes();
@@ -77,10 +76,6 @@ async function main() {
           where not exists (select 1 from public.kyc_records where user_id = $1)`,
         [user.id],
       );
-      await admin.query('update public.user_profiles set risk_disclosure_version = $2, risk_disclosure_accepted_at = coalesce(risk_disclosure_accepted_at, now()) where user_id = $1', [
-        user.id,
-        RISK_DISCLOSURE_VERSION,
-      ]);
       if (u.role) {
         await admin.query('insert into public.staff_roles (user_id, role, granted_by) values ($1, $2, null) on conflict do nothing', [user.id, u.role]);
       }

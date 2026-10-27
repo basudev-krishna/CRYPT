@@ -28,7 +28,7 @@ export default async function WithdrawPage() {
   const minRow = token ? await db.query<{ m: string }>('select min_withdrawal_base::text as m from public.supported_tokens where id = $1', [token.id]) : null;
   const blocked = paused
     ? 'Withdrawals are temporarily paused by operations. Your funds remain in your account.'
-    : dash.profile?.kycStatus !== 'approved'
+    : policy.params.require_kyc_approved && dash.profile?.kycStatus !== 'approved'
       ? 'Identity verification must be approved before withdrawing.'
       : dash.profile?.accountStatus !== 'active'
         ? 'Your account is restricted. Contact support.'

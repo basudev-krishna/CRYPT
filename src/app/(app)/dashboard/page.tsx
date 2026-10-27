@@ -1,17 +1,16 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { ArrowDownLeft, ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, ArrowUpRight, CheckCircle2, Circle, Clock, LineChart, PiggyBank, Sparkles, TrendingUp, Wallet } from 'lucide-react';
+import { ArrowDownLeft, ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, ArrowUpRight, Clock, LineChart, PiggyBank, Sparkles, TrendingUp, Wallet } from 'lucide-react';
 import { pageUser } from '@/server/http/auth';
 import { webDb } from '@/server/db';
 import { getDashboard, getUserSeries, listActivity } from '@/server/queries/user';
 import { Badge, ButtonLink, Card, CardHeader, EmptyState, Notice, SimulatedBadge } from '@/components/ui/primitives';
 import { Bps, Money, fmt } from '@/components/ui/money';
-import { EVENT_LABELS, KycStatus } from '@/components/ui/status';
+import { EVENT_LABELS } from '@/components/ui/status';
 import { Stat } from '@/components/app/stat';
 import { AllocationDonut, ValueChart } from '@/components/charts/value-chart';
 import { Reveal, Stagger, StaggerItem } from '@/components/ui/motion';
 import { baseToChart, dateTime } from '@/lib/format';
-import { RISK_DISCLOSURE_VERSION } from '@/lib/disclosures';
 import { serverEnv } from '@/server/env';
 import { MICRO_DECIMALS, memberHolding } from '@/server/offchain/holdings';
 
@@ -29,21 +28,6 @@ function greeting(): string {
   return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
 }
 
-/** Onboarding progress as a ring; the fraction is a step count, not money. */
-function ProgressRing({ done, total }: { done: number; total: number }) {
-  const r = 26;
-  const c = 2 * Math.PI * r;
-  return (
-    <svg width="64" height="64" viewBox="0 0 64 64" role="img" aria-label={`${done} of ${total} steps complete`}>
-      <circle cx="32" cy="32" r={r} fill="none" stroke="var(--color-surface-3)" strokeWidth="6" />
-      <circle cx="32" cy="32" r={r} fill="none" stroke="var(--color-accent)" strokeWidth="6" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - done / total)} transform="rotate(-90 32 32)" className="transition-[stroke-dashoffset] duration-700" />
-      <text x="32" y="36" textAnchor="middle" className="fill-fg text-[13px] font-semibold">
-        {done}/{total}
-      </text>
-    </svg>
-  );
-}
-
 export default async function DashboardPage() {
   const user = await pageUser();
   const db = webDb();
@@ -59,13 +43,6 @@ export default async function DashboardPage() {
   const group = serverEnv().GROUP_MODE;
   const quickActions = group ? QUICK_ACTIONS.filter((q) => q.href !== '/portfolio') : QUICK_ACTIONS;
   const perfAvailable = d.performance.month.periods > 0 && !d.position?.latestValuationFailed;
-  const onboarding = [
-    { done: true, label: 'Email verified' },
-    { done: d.profile?.kycStatus === 'approved', label: 'Identity verification', href: '/settings' },
-    { done: d.profile?.riskDisclosureVersion === RISK_DISCLOSURE_VERSION, label: 'Risk disclosure accepted', href: '/disclosures' },
-    { done: user.hasMfaFactor, label: 'Two-factor authentication', href: '/settings/security' },
-  ];
-  const doneSteps = onboarding.filter((o) => o.done).length;
   const name = d.profile?.displayName?.split(' ')[0];
   const slices = [
     { key: 'available', label: 'Available', amount: d.available },
@@ -114,33 +91,6 @@ export default async function DashboardPage() {
             </Link>
           </Notice>
         </div>
-      ) : null}
-
-      {doneSteps < onboarding.length ? (
-        <Reveal className="mb-6">
-          <Card className="flex flex-wrap items-center gap-5">
-            <ProgressRing done={doneSteps} total={onboarding.length} />
-            <div className="min-w-[200px] flex-1">
-              <p className="font-medium">Finish setting up your account</p>
-              <p className="text-sm text-fg-muted">Deposits and withdrawals unlock once these steps are complete.</p>
-            </div>
-            <ul className="flex flex-wrap gap-2">
-              {onboarding.map((o) => (
-                <li key={o.label}>
-                  {o.done || !o.href ? (
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-gain/10 px-3 py-1.5 text-xs font-medium text-gain">
-                      <CheckCircle2 size={14} aria-hidden /> {o.label}
-                    </span>
-                  ) : (
-                    <Link href={o.href} className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-medium ring-1 ring-line transition hover:-translate-y-px hover:text-accent hover:ring-accent/50">
-                      <Circle size={14} aria-hidden /> {o.label}
-                    </Link>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </Card>
-        </Reveal>
       ) : null}
 
       <Stagger className={`grid gap-4 sm:grid-cols-2 ${group ? '' : 'xl:grid-cols-4'}`}>
@@ -275,8 +225,6 @@ export default async function DashboardPage() {
               </>
             )}
             <div className="mt-5 space-y-2 border-t border-line pt-4 text-sm">
-              <div className="flex justify-between"><span className="text-fg-muted">Verification</span><KycStatus status={d.profile?.kycStatus ?? 'not_started'} /></div>
-              <div className="flex justify-between"><span className="text-fg-muted">Two-factor</span>{user.hasMfaFactor ? <Badge tone="success">Enabled</Badge> : <Badge tone="warn">Off</Badge>}</div>
               <div className="flex justify-between"><span className="text-fg-muted">Pending deposits</span><span className="num">{d.pending.depositsCount}</span></div>
               <div className="flex justify-between"><span className="text-fg-muted">Pending withdrawals</span><span className="num">{d.pending.withdrawalsCount}</span></div>
             </div>

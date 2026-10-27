@@ -73,7 +73,7 @@ export function LoginForm() {
   );
 }
 
-type RegisterField = 'fullName' | 'username' | 'email' | 'phone' | 'countryCode' | 'password' | 'confirm' | 'referralCode' | 'acceptTerms';
+type RegisterField = 'fullName' | 'username' | 'email' | 'phone' | 'countryCode' | 'password' | 'confirm' | 'referralCode';
 
 export function RegisterForm({ email = '', referralCode = '' }: { email?: string; referralCode?: string }) {
   const router = useRouter();
@@ -104,7 +104,6 @@ export function RegisterForm({ email = '', referralCode = '' }: { email?: string
         countryCode: country,
         password,
         referralCode: String(f.get('referralCode') ?? ''),
-        acceptTerms: f.get('terms') === 'on',
       });
       if (!r.ok) {
         if (r.code === 'validation_error') {
@@ -176,13 +175,6 @@ export function RegisterForm({ email = '', referralCode = '' }: { email?: string
       <Field label="Referral id (optional)" htmlFor="referralCode" error={fe.referralCode} hint={fe.referralCode ? undefined : 'Member id of the person who referred you, e.g. EW-000123'}>
         <Input id="referralCode" name="referralCode" defaultValue={referralCode} autoCapitalize="characters" spellCheck={false} maxLength={12} />
       </Field>
-      <label className="flex items-start gap-2 text-sm text-fg-muted">
-        <input type="checkbox" name="terms" className="mt-1" />
-        <span>
-          I accept the terms and have read the <a href="/disclosures" className="text-accent hover:underline" target="_blank">risk disclosure</a>. Crypto transfers cannot be reversed and you can lose money.
-        </span>
-      </label>
-      {fe.acceptTerms ? <p className="text-xs text-loss">{fe.acceptTerms}</p> : null}
       {error ? <Notice tone="danger">{error}</Notice> : null}
       <Button type="submit" disabled={busy} className="w-full">{busy ? 'Creating account…' : 'Create account'}</Button>
     </form>
