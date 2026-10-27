@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import {
-  ArrowRight,
   ArrowRightCircle,
   BadgeCheck,
   BookLock,
@@ -110,7 +109,15 @@ const STEPS: { icon: LucideIcon; title: string; body: string }[] = [
   },
 ];
 
-export function HowItWorks() {
+/** Group mode replaces the first step: one shared watched wallet, deposits attributed by the member's signed sending wallet. */
+const GROUP_DEPOSIT_STEP = {
+  icon: Wallet,
+  title: 'Deposit USDT',
+  body: 'Register and sign for your sending wallet, then send USDT (BEP20) on BNB Smart Chain to the group wallet. Each transfer is matched to you by its sending wallet and credited only after enough confirmations.',
+};
+
+export function HowItWorks({ realFunds }: { realFunds: boolean }) {
+  const steps = realFunds ? [GROUP_DEPOSIT_STEP, ...STEPS.slice(1)] : STEPS;
   return (
     <section id="how-it-works" className={`${container} scroll-mt-8 py-20 sm:py-28`}>
       <SectionHeader
@@ -119,7 +126,7 @@ export function HowItWorks() {
         intro="Every step below posts a balanced journal entry. Your dashboard, statements and the operator's treasury view all read from the same journal."
       />
       <ol className="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {STEPS.map((s, i) => (
+        {steps.map((s, i) => (
           <li key={s.title} className={`${card} relative p-7`}>
             <div className="flex items-center justify-between">
               <IconBadge icon={s.icon} />
@@ -431,38 +438,46 @@ export function NetworksAndStatus() {
   );
 }
 
-/* -------------------------------------------------------------------- FAQ */
+/* ----------------------------------------------------------- group status */
 
-const FAQ: [string, string][] = [
-  ['Is this real money?', 'No. This build runs on test networks and a simulated trading venue. Test tokens have no value, and mainnet networks are disabled in the code.'],
-  ['Is there a guaranteed or fixed return?', 'No. There are no fixed rates and no scheduled balance increases. Your result depends entirely on how the pool’s trades perform, and it can be negative.'],
-  ['How is my return calculated?', 'You own units of a pool. At each valuation, NAV per unit is struck from trade executions and market prices after fees. Your result is your units multiplied by the change in NAV per unit.'],
-  ['What fees apply?', 'A management fee and a performance fee above a high-water mark are deducted inside the NAV, and a fixed fee applies per withdrawal. Fee rules are versioned and shown in the app.'],
-  ['Why might my withdrawal be held?', 'New addresses have a cooldown, large amounts are reviewed, and payouts pause automatically if reconciliation finds a discrepancy. Reserved funds stay in your account.'],
+const GROUP_COMPONENTS = [
+  { name: 'BNB Smart Chain, USDT (BEP20)', status: 'Active' },
+  { name: 'Ledger, NAV and withdrawal policy', status: 'Implemented' },
+  { name: 'Group wallet', status: 'Watch-only' },
+  { name: 'Payouts', status: 'Signed by the administrator' },
+  { name: 'Membership', status: 'Approved by the administrator' },
 ];
 
-export function Faq() {
+/** Real-funds counterpart of NetworksAndStatus: the private group's one supported shape (see phase-guard.ts). */
+export function GroupStatus() {
   return (
-    <section id="faq" className={`${container} scroll-mt-8 py-20 sm:py-28`}>
-      <div className="grid gap-12 lg:grid-cols-[0.8fr_1.2fr]">
-        <div>
-          <SectionHeader eyebrow="FAQ" title="Common questions." />
-          <Link href="/support" className="mt-6 inline-flex items-center gap-1.5 text-sm font-medium transition hover:opacity-70" style={{ color: 'var(--color-accent)' }}>
-            All support answers <ArrowRight size={16} aria-hidden />
-          </Link>
-        </div>
-        <div className="space-y-3">
-          {FAQ.map(([q, a]) => (
-            <details key={q} className={`${card} group px-6 py-5`}>
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-medium [&::-webkit-details-marker]:hidden">
-                {q}
-                <span className="text-xl leading-none opacity-50 transition-transform group-open:rotate-45" aria-hidden>
-                  +
-                </span>
-              </summary>
-              <p className="mt-3 text-[15px] leading-relaxed opacity-75">{a}</p>
-            </details>
-          ))}
+    <section id="networks" className="scroll-mt-8 bg-white/40 py-20 sm:py-28">
+      <div className={container}>
+        <SectionHeader
+          eyebrow="How the group runs"
+          title="Real USDT, one network, no keys held by the app."
+          intro="Deposits arrive in a single group wallet on BNB Smart Chain. The app only watches that wallet; every payout is signed by the administrator and its transaction is checked on chain before it is settled."
+        />
+        <div className="mt-12 grid gap-4 lg:grid-cols-[1fr_1fr]">
+          <div className={`${card} p-7`}>
+            <h3 className="font-semibold">What is in place</h3>
+            <ul className="mt-4 divide-y divide-black/5 text-sm">
+              {GROUP_COMPONENTS.map((c) => (
+                <li key={c.name} className="flex items-center justify-between gap-4 py-3">
+                  <span className="opacity-80">{c.name}</span>
+                  <StatusPill status={c.status} />
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="rounded-3xl p-7" style={{ background: 'rgba(115,66,226,0.08)' }}>
+            <h3 className="text-lg font-semibold">What this is not</h3>
+            <ul className="mt-3 list-disc space-y-1.5 pl-5 text-[15px] opacity-75">
+              <li>It is not a public offering. Membership is private and every sign-up is approved by the administrator.</li>
+              <li>It is not licensed, independently audited or penetration tested.</li>
+              <li>It does not guarantee any return. Real money is involved and you can lose some or all of it.</li>
+            </ul>
+          </div>
         </div>
       </div>
     </section>
@@ -471,18 +486,20 @@ export function Faq() {
 
 /* -------------------------------------------------------------------- CTA */
 
-export function FinalCta({ signedIn }: { signedIn: boolean }) {
+export function FinalCta({ signedIn, realFunds }: { signedIn: boolean; realFunds: boolean }) {
   return (
     <section className={`${container} pb-20 sm:pb-28`}>
       <div className="relative overflow-hidden rounded-[32px] px-7 py-14 text-white sm:px-14 sm:py-20" style={{ background: 'linear-gradient(135deg, #7342e2 0%, #4b2aa8 100%)' }}>
         <div className="max-w-xl">
-          <h2 style={{ ...headingStyle, fontSize: 'clamp(1.6rem, 4vw, 2.6rem)' }}>See the ledger for yourself.</h2>
+          <h2 style={{ ...headingStyle, fontSize: 'clamp(1.6rem, 4vw, 2.6rem)' }}>{realFunds ? 'Join the group.' : 'See the ledger for yourself.'}</h2>
           <p className="mt-4 text-[15px] leading-relaxed opacity-85 sm:text-base">
-            Open a testnet account, deposit test USDT and follow each entry from deposit to withdrawal. Nothing here has real value.
+            {realFunds
+              ? 'Create an account and the administrator will review your request. Once approved, register your sending wallet to see where to deposit.'
+              : 'Open a testnet account, deposit test USDT and follow each entry from deposit to withdrawal. Nothing here has real value.'}
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link href={signedIn ? '/dashboard' : '/register'} className="inline-flex items-center gap-3 rounded-full bg-white px-6 py-3.5 text-sm font-semibold transition hover:brightness-95" style={{ color: 'var(--color-accent)' }}>
-              {signedIn ? 'Open your dashboard' : 'Create testnet account'}
+              {signedIn ? 'Open your dashboard' : realFunds ? 'Request to join' : 'Create testnet account'}
               <ArrowRightCircle size={18} aria-hidden />
             </Link>
           </div>
@@ -525,16 +542,20 @@ const FOOTER_COLUMNS: { title: string; links: { label: string; href: string }[] 
   },
 ];
 
-export function Footer() {
+export function Footer({ realFunds }: { realFunds: boolean }) {
   return (
     <footer className="border-t border-black/10">
       <div className={`${container} grid gap-10 py-14 md:grid-cols-[1.4fr_repeat(3,1fr)]`}>
         <div className="max-w-sm">
-          <div className="flex items-center gap-2.5">
+          <Link href="/" className="flex w-fit items-center gap-2.5" aria-label="EliteWhale home">
             <LogoMark size={22} />
             <span className="font-semibold tracking-tight">EliteWhale</span>
-          </div>
-          <p className="mt-4 text-sm leading-relaxed opacity-65">An auditable USDT investment ledger, demonstrated on test networks with a simulated trading venue.</p>
+          </Link>
+          <p className="mt-4 text-sm leading-relaxed opacity-65">
+            {realFunds
+              ? 'A private USDT investment group on BNB Smart Chain, run on an auditable double-entry ledger.'
+              : 'An auditable USDT investment ledger, demonstrated on test networks with a simulated trading venue.'}
+          </p>
         </div>
         {FOOTER_COLUMNS.map((col) => (
           <nav key={col.title} aria-label={col.title}>
@@ -553,11 +574,23 @@ export function Footer() {
       </div>
       <div className="border-t border-black/10">
         <div className={`${container} space-y-2 py-6 text-xs leading-relaxed opacity-60`}>
-          <p>
-            Testnet demonstration software. Not an offer, solicitation or recommendation to invest, and the operator is not licensed to provide investment services. No real funds are
-            accepted, held or paid out.
-          </p>
-          <p>Returns are never guaranteed. Values can fall as well as rise, and simulated performance does not indicate future results.</p>
+          {realFunds ? (
+            <>
+              <p>
+                Private group software. Not an offer, solicitation or recommendation to invest, and the operator is not licensed to provide investment services. Real USDT is
+                deposited and paid out; you can lose some or all of it.
+              </p>
+              <p>Returns are never guaranteed. Values can fall as well as rise, and past performance does not indicate future results.</p>
+            </>
+          ) : (
+            <>
+              <p>
+                Testnet demonstration software. Not an offer, solicitation or recommendation to invest, and the operator is not licensed to provide investment services. No real
+                funds are accepted, held or paid out.
+              </p>
+              <p>Returns are never guaranteed. Values can fall as well as rise, and simulated performance does not indicate future results.</p>
+            </>
+          )}
           <p>© {new Date().getFullYear()} EliteWhale</p>
         </div>
       </div>

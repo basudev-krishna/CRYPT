@@ -14,7 +14,6 @@ const NAV_LINKS = [
   { label: 'Valuation', href: '#nav' },
   { label: 'Withdrawals', href: '#controls' },
   { label: 'Security', href: '#security' },
-  { label: 'FAQ', href: '#faq' },
 ];
 
 const fadeUp: Variants = {
@@ -27,18 +26,18 @@ export function LogoMark({ size = 32 }: { size?: number }) {
   return <Image src="/logo.png" alt="" aria-hidden width={Math.round(size * 1.5)} height={size} className="shrink-0 object-contain" priority={size <= 40} />;
 }
 
-function Logo() {
+function Logo({ realFunds }: { realFunds: boolean }) {
   return (
     <Link href="/" className="flex items-center gap-2.5" aria-label="EliteWhale home">
       <LogoMark />
       <span className="text-base font-semibold tracking-tight">EliteWhale</span>
-      <span className="rounded-full border border-[color:var(--color-text)]/25 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider opacity-70">testnet</span>
+      <span className="rounded-full border border-[color:var(--color-text)]/25 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider opacity-70">{realFunds ? 'private group' : 'testnet'}</span>
     </Link>
   );
 }
 
 /** Primary/secondary CTAs; signed-in visitors get a single "Open app" link. */
-function NavCtas({ signedIn, onNavigate }: { signedIn: boolean; onNavigate?: () => void }) {
+function NavCtas({ signedIn, realFunds, onNavigate }: { signedIn: boolean; realFunds: boolean; onNavigate?: () => void }) {
   const base = 'rounded-full px-5 py-2.5 text-sm font-medium text-center transition hover:brightness-105';
   if (signedIn) {
     return (
@@ -50,7 +49,7 @@ function NavCtas({ signedIn, onNavigate }: { signedIn: boolean; onNavigate?: () 
   return (
     <>
       <Link href="/register" onClick={onNavigate} className={`${base} text-white`} style={{ background: 'var(--color-accent)' }}>
-        Create Testnet Account
+        {realFunds ? 'Request to Join' : 'Create Testnet Account'}
       </Link>
       <Link href="/login" onClick={onNavigate} className={base} style={{ background: 'var(--color-login-bg)' }}>
         Sign In
@@ -59,7 +58,7 @@ function NavCtas({ signedIn, onNavigate }: { signedIn: boolean; onNavigate?: () 
   );
 }
 
-function MobileSheet({ open, onClose, signedIn }: { open: boolean; onClose: () => void; signedIn: boolean }) {
+function MobileSheet({ open, onClose, signedIn, realFunds }: { open: boolean; onClose: () => void; signedIn: boolean; realFunds: boolean }) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -93,7 +92,9 @@ function MobileSheet({ open, onClose, signedIn }: { open: boolean; onClose: () =
             transition={{ ease: EASE, duration: 0.45 }}
           >
             <div className="flex items-center justify-between">
-              <LogoMark />
+              <Link href="/" onClick={onClose} aria-label="EliteWhale home">
+                <LogoMark />
+              </Link>
               <button type="button" onClick={onClose} aria-label="Close menu" className="rounded-full p-2 transition hover:bg-black/5">
                 <X size={22} />
               </button>
@@ -109,7 +110,7 @@ function MobileSheet({ open, onClose, signedIn }: { open: boolean; onClose: () =
               ))}
             </nav>
             <div className="mt-auto flex flex-col gap-3">
-              <NavCtas signedIn={signedIn} onNavigate={onClose} />
+              <NavCtas signedIn={signedIn} realFunds={realFunds} onNavigate={onClose} />
             </div>
           </motion.aside>
         </>
@@ -120,7 +121,8 @@ function MobileSheet({ open, onClose, signedIn }: { open: boolean; onClose: () =
 
 const iconStyle = { display: 'inline-block', verticalAlign: 'middle', position: 'relative', top: -2 } as const;
 
-export function Hero({ signedIn }: { signedIn: boolean }) {
+/** `realFunds` switches the testnet wording to the private group's (real BSC USDT). */
+export function Hero({ signedIn, realFunds }: { signedIn: boolean; realFunds: boolean }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
@@ -131,7 +133,7 @@ export function Hero({ signedIn }: { signedIn: boolean }) {
         <video className="absolute inset-0 h-full w-full object-cover" src={VIDEO_SRC} autoPlay muted loop playsInline preload="metadata" aria-hidden />
 
         <header className="relative z-10 mx-auto flex max-w-[1280px] items-center justify-between px-5 py-4 sm:px-8 sm:py-5">
-          <Logo />
+          <Logo realFunds={realFunds} />
           <nav className="hidden items-center gap-8 md:flex">
             {NAV_LINKS.map((l) => (
               <Link key={l.label} href={l.href} className="text-sm font-medium transition-opacity hover:opacity-60">
@@ -140,7 +142,7 @@ export function Hero({ signedIn }: { signedIn: boolean }) {
             ))}
           </nav>
           <div className="hidden items-center gap-2 md:flex">
-            <NavCtas signedIn={signedIn} />
+            <NavCtas signedIn={signedIn} realFunds={realFunds} />
           </div>
           <button type="button" className="rounded-full p-2 md:hidden" onClick={() => setMenuOpen(true)} aria-label="Open menu" aria-expanded={menuOpen}>
             <Menu size={24} />
@@ -157,7 +159,7 @@ export function Hero({ signedIn }: { signedIn: boolean }) {
               className="mb-5 inline-flex rounded-full px-3 py-1 text-xs font-medium"
               style={{ background: 'rgba(115,66,226,0.12)', color: 'var(--color-accent)' }}
             >
-              Testnet MVP · simulated trading venue
+              {realFunds ? 'Private group · USDT on BNB Smart Chain' : 'Testnet MVP · simulated trading venue'}
             </motion.p>
 
             <motion.h1
@@ -197,7 +199,7 @@ export function Hero({ signedIn }: { signedIn: boolean }) {
                     gap: 32,
                   }}
                 >
-                  {signedIn ? 'Open Your Dashboard' : 'Try It on Testnet'}
+                  {signedIn ? 'Open Your Dashboard' : realFunds ? 'Request to Join' : 'Try It on Testnet'}
                   <ArrowRightCircle size={20} aria-hidden />
                 </Link>
               </motion.div>
@@ -209,7 +211,7 @@ export function Hero({ signedIn }: { signedIn: boolean }) {
           </div>
         </div>
 
-        <MobileSheet open={menuOpen} onClose={() => setMenuOpen(false)} signedIn={signedIn} />
+        <MobileSheet open={menuOpen} onClose={() => setMenuOpen(false)} signedIn={signedIn} realFunds={realFunds} />
       </section>
     </MotionConfig>
   );
