@@ -86,6 +86,7 @@ async function main() {
       }
       if (u.deposit) {
         const ins = await getDepositInstructions(worker, new SimulatedCustodyProvider(worker), user.id, network.id, actor);
+        if (!ins.address) throw new Error('Demo seeding expects per-user deposit addresses, not a group wallet');
         const existing = await one<{ n: number }>(admin, 'select count(*)::int as n from public.sim_chain_transfers where to_address = $1', [ins.address]);
         if (existing.n === 0) {
           const tx = await insertSimTransfer(admin, {

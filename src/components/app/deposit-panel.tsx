@@ -18,7 +18,8 @@ interface NetworkOption {
 interface Instructions {
   network: { id: number; code: string; name: string; isTestnet: boolean; isSimulated: boolean; requiredConfirmations: number };
   token: { id: number; symbol: string; contractAddress: string; decimals: number; isTestToken: boolean };
-  address: string;
+  /** Null in group mode until the member has registered a sending wallet. */
+  address: string | null;
   mode: 'group_wallet' | 'deposit_address';
   minDepositBase: string;
 }
@@ -33,7 +34,7 @@ export function DepositPanel({ networks, demoMode }: { networks: NetworkOption[]
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (!ins) return;
+    if (!ins?.address) return;
     // Only the address is encoded: wallets must still be set to the right network manually.
     QRCode.toDataURL(ins.address, { margin: 1, width: 180, color: { dark: '#192837', light: '#ffffff' } }).then(setQr, () => setQr(null));
   }, [ins]);
@@ -99,9 +100,16 @@ export function DepositPanel({ networks, demoMode }: { networks: NetworkOption[]
         ) : null}
       </Card>
 
-      {ins?.mode === 'group_wallet' ? <MemberWallets networkId={ins.network.id} networkName={ins.network.name} /> : null}
+      {ins?.mode === 'group_wallet' ? <MemberWallets networkId={ins.network.id} networkName={ins.network.name} onChange={load} /> : null}
 
-      {ins ? (
+      {ins && !ins.address ? (
+        <Notice tone="warn" title="Register a sending wallet to see the deposit address">
+          Deposits are credited by the wallet they come from, so the group wallet address is shown only after you register the wallet you will send from. Transfers
+          from wallets that aren&apos;t registered here can&apos;t be traced to you.
+        </Notice>
+      ) : null}
+
+      {ins?.address ? (
         <Card>
           <CardHeader
             title={ins.mode === 'group_wallet' ? '2. Send to the group wallet' : '2. Send tokens to this address'}
@@ -132,7 +140,7 @@ export function DepositPanel({ networks, demoMode }: { networks: NetworkOption[]
                     variant="secondary"
                     className="h-8 px-3 text-xs"
                     onClick={async () => {
-                      await navigator.clipboard.writeText(ins.address);
+                      await navigator.clipboard.writeText(ins.address ?? '');
                       setCopied(true);
                       setTimeout(() => setCopied(false), 1500);
                     }}

@@ -39,10 +39,14 @@ export class DepositError extends Error {
 export interface DepositInstructions {
   network: { id: number; code: string; name: string; isTestnet: boolean; isSimulated: boolean; requiredConfirmations: number };
   token: { id: number; symbol: string; contractAddress: string; decimals: number; isTestToken: boolean };
-  address: string;
+  /** Null in group mode until the member has registered a sending wallet on this network. */
+  address: string | null;
   /**
    * `group_wallet`: `address` is shared by every member and deposits are
    * attributed by the sender, so the member must send from a registered wallet.
+   * The address is withheld until they have one: a deposit from an unknown
+   * sender can't be attributed, so we never hand out the address without a
+   * wallet to match it to.
    * `deposit_address`: `address` is this member's own.
    */
   mode: 'group_wallet' | 'deposit_address';
@@ -87,7 +91,14 @@ export async function getDepositInstructions(db: Db, custody: CustodyProvider, u
 
   // A group wallet needs no custody: the address is shared and watched, never signed for.
   const group = await getGroupWallet(db, networkId);
-  if (group) return { network: networkInfo, token: tokenInfo, address: group.address, mode: 'group_wallet', minDepositBase: token.minDepositBase };
+  if (group) {
+    const registered = await maybeOne<{ x: number }>(
+      db,
+      "select 1 as x from public.member_wallets where user_id = $1 and network_id = $2 and status = 'active' limit 1",
+      [userId, networkId],
+    );
+    return { network: networkInfo, token: tokenInfo, address: registered ? group.address : null, mode: 'group_wallet', minDepositBase: token.minDepositBase };
+  }
 
   if (!custody.supportsNetwork(network.code)) throw new DepositError('Custody is not configured for this network', 'custody_unavailable');
 

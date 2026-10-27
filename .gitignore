@@ -13,3 +13,5 @@ supabase/.branches
 *.tsbuildinfo
 next-env.d.ts
 .env.test
+.vercel
+.env*

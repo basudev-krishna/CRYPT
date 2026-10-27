@@ -104,6 +104,7 @@ export function MemberWallets({ networkId, networkName, onChange }: { networkId:
     const r = await apiDelete(`/api/deposits/wallets/${id}`);
     if (!r.ok) setMsg({ tone: 'danger', text: r.error ?? 'Could not remove the wallet' });
     load();
+    onChange?.();
   }
 
   return (

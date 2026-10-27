@@ -43,12 +43,23 @@ const memberFunds = async (userId: string) => (await balanceOf('user_cash', toke
 const deposit = () => one<{ id: string; user_id: string | null; status: string; status_reason: string | null; member_wallet_id: string | null }>(admin, 'select id, user_id, status, status_reason, member_wallet_id from public.deposits');
 
 describe('group wallet deposits', () => {
-  it('gives every member the shared group wallet address without calling custody', async () => {
+  it('reveals the shared group wallet only after the member registers a sending wallet, without calling custody', async () => {
     const user = await createUser();
     const net = await simNetwork();
-    const ins = await getDepositInstructions(worker, new SimulatedCustodyProvider(worker), user, net.id, actor);
-    expect(ins).toMatchObject({ mode: 'group_wallet', address: GROUP });
+    const instructions = () => getDepositInstructions(worker, new SimulatedCustodyProvider(worker), user, net.id, actor);
+    expect(await instructions()).toMatchObject({ mode: 'group_wallet', address: null });
+
+    await register(user, privateKeyToAccount(generatePrivateKey()));
+    expect(await instructions()).toMatchObject({ mode: 'group_wallet', address: GROUP });
     expect((await admin.query('select count(*)::int as n from public.deposit_addresses')).rows[0].n).toBe(0);
+  });
+
+  it('withholds the address again once the member removes their only wallet', async () => {
+    const user = await createUser();
+    const net = await simNetwork();
+    const wallet = await register(user, privateKeyToAccount(generatePrivateKey()));
+    await withTransaction(web, (db) => removeMemberWallet(db, { userId: user, walletId: wallet.id, actor }));
+    expect(await getDepositInstructions(worker, new SimulatedCustodyProvider(worker), user, net.id, actor)).toMatchObject({ address: null });
   });
 
   it('credits a deposit from a registered wallet to its owner, exactly once', async () => {

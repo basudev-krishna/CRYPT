@@ -19,6 +19,7 @@ afterAll(closePools);
 async function addressFor(userId: string) {
   const net = await getNetwork(worker, 'sim-evm');
   const ins = await getDepositInstructions(web(), new SimulatedCustodyProvider(worker), userId, net.id, actor);
+  if (!ins.address) throw new Error('expected a per-user deposit address');
   return ins.address;
 }
 // Address issuance is a web action; use the worker pool here for simplicity (both roles may insert).
