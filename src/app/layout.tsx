@@ -33,16 +33,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   );
 }
 
-/** Always visible: says plainly whether money here is real. */
+/** Testnet only: says plainly that nothing here is real money. The live group site shows no banner. */
 function EnvironmentBanner() {
-  if (realFundsActive()) {
-    return (
-      <div className="border-b border-warn/30 bg-warn/10 px-4 py-1.5 text-center text-xs text-warn">
-        <strong className="font-semibold">Real funds.</strong> Balances are real USDT (BEP20) on BNB Smart Chain, held in a group wallet the administrator
-        controls. Only send from a wallet you have registered here.
-      </div>
-    );
-  }
+  if (realFundsActive()) return null;
   return (
     <div className="border-b border-sim/30 bg-sim/10 px-4 py-1.5 text-center text-xs text-sim">
       <strong className="font-semibold">Testnet demonstration.</strong> Balances, deposits and trading results are simulated or on test networks.
