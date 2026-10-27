@@ -534,18 +534,12 @@ const FOOTER_COLUMNS: { title: string; links: { label: string; href: string }[] 
       { label: 'Dashboard', href: '/dashboard' },
     ],
   },
-  {
-    title: 'Help',
-    links: [
-      { label: 'Support & FAQ', href: '/support' },
-    ],
-  },
 ];
 
 export function Footer({ realFunds }: { realFunds: boolean }) {
   return (
     <footer className="border-t border-black/10">
-      <div className={`${container} grid gap-10 py-14 md:grid-cols-[1.4fr_repeat(3,1fr)]`}>
+      <div className={`${container} grid gap-10 py-14 md:grid-cols-[1.4fr_repeat(2,1fr)]`}>
         <div className="max-w-sm">
           <Link href="/" className="flex w-fit items-center gap-2.5" aria-label="EliteWhale home">
             <LogoMark size={22} />
