@@ -95,13 +95,12 @@ test('a customer without a staff role cannot use staff endpoints', async ({ page
   await expect(page).toHaveURL(/\/dashboard/);
 });
 
-test('a staff role without an MFA-verified session is still refused', async ({ page }) => {
+test('staff without two-factor reach the console (two-factor is optional for staff)', async ({ page }) => {
   await db.query("insert into public.staff_roles (user_id, role) values ($1, 'admin') on conflict do nothing", [attacker.id]);
   try {
     await login(page, attacker.email);
     const res = await page.request.get('/api/admin/overview');
-    expect(res.status()).toBe(403);
-    expect((await res.json()).code).toBe('staff_mfa_required');
+    expect(res.status()).toBe(200);
   } finally {
     await db.query('delete from public.staff_roles where user_id = $1', [attacker.id]);
   }

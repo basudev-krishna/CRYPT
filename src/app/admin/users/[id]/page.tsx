@@ -11,7 +11,8 @@ import { JsonBlock } from '@/components/admin/json';
 import { dateTime } from '@/lib/format';
 import { formatUnits } from '@/lib/money';
 import { pageStaff } from '@/server/http/auth';
-import { can } from '@/server/permissions';
+import { can, type StaffRole } from '@/server/permissions';
+import { STAFF_ROLES } from '@/server/staff';
 import { listAdjustments, operatorFloats } from '@/server/adjustments/manual';
 import { AdjustmentForm } from '@/components/admin/adjustment-form';
 import { getMembership } from '@/server/queries/user';
@@ -40,6 +41,8 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
     teamTree(db, id, 3),
     networkHistory(db, id),
   ]);
+  const roles = (await db.query<{ role: StaffRole }>('select role::text as role from public.staff_roles where user_id = $1 order by role', [id])).rows.map((r) => r.role);
+  const canManageStaff = can(staff.roles, 'staff.manage');
   const canAdjust = can(staff.roles, 'balance.adjust');
   const canNetwork = can(staff.roles, 'network.manage');
   const fundOptions = [
@@ -66,6 +69,22 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
               { value: 'active', label: 'Reactivate', field: 'status' },
             ]} submitLabel="Apply" noteLabel="Documented reason" />
           )}
+          <div className="mt-5 border-t border-line pt-4">
+            <p className="mb-2 text-sm">
+              <span className="text-fg-muted">Staff roles: </span>
+              {roles.length ? roles.map((r) => <Badge key={r} tone="warn">{r.replace('_', ' ')}</Badge>) : <span className="text-fg-muted">none</span>}
+            </p>
+            {canManageStaff ? (
+              <NoteAction
+                url={`/api/admin/users/${id}/roles`}
+                options={STAFF_ROLES.map((r) =>
+                  roles.includes(r) ? { value: `revoke:${r}`, label: `Remove ${r.replace('_', ' ')} role`, field: 'change' } : { value: `grant:${r}`, label: `Make ${r.replace('_', ' ')}`, field: 'change' },
+                )}
+                submitLabel="Change role"
+                noteLabel="Reason"
+              />
+            ) : null}
+          </div>
         </Card>
         <Card>
           <CardHeader title="Balances (ledger)" />

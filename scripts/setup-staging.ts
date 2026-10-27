@@ -5,6 +5,7 @@
  *                                                         # role passwords + reference data; with --env-file the new
  *                                                         # DATABASE_URL_WEB/WORKER are written there instead of printed
  *   npx tsx scripts/setup-staging.ts grant-admin <email>  # after that admin has signed up at /register
+ *   npx tsx scripts/setup-staging.ts grant-admin <email> --sole  # ...and remove every other staff role
  *   npx tsx scripts/setup-staging.ts group-mode <network-code> <group-wallet> [<token-contract> <decimals> <symbol>]
  *                                                         # private group: one watched wallet, no investment pool
  *
@@ -36,9 +37,9 @@ async function main() {
       throw new Error('Migrations are not applied yet. Run `npx supabase db push --db-url ...` first.');
     }
     if (cmd === 'init') await init(db, parsed, arg === '--env-file' ? process.argv[4] : undefined);
-    else if (cmd === 'grant-admin' && arg) await grantAdmin(db, arg);
+    else if (cmd === 'grant-admin' && arg) await grantAdmin(db, arg, process.argv[4] === '--sole');
     else if (cmd === 'group-mode' && arg) await groupMode(db, arg, process.argv.slice(4));
-    else throw new Error('Usage: setup-staging.ts init | grant-admin <email> | group-mode <network-code> <group-wallet> [<token-contract> <decimals> <symbol>]');
+    else throw new Error('Usage: setup-staging.ts init | grant-admin <email> [--sole] | group-mode <network-code> <group-wallet> [<token-contract> <decimals> <symbol>]');
   } finally {
     await db.end();
   }
@@ -103,23 +104,49 @@ These passwords are not stored anywhere else. Re-running "init" rotates them.`);
 }
 
 
-async function grantAdmin(db: pg.Client, email: string) {
+/** Grant admin to `email`. With `sole`, every other staff role is removed in the same transaction. */
+async function grantAdmin(db: pg.Client, email: string, sole = false) {
   const r = await db.query('select id, email_confirmed_at from auth.users where lower(email) = $1', [email.trim().toLowerCase()]);
   const u = r.rows[0];
   if (!u) throw new Error('No account with that email. Sign up at /register first.');
   if (!u.email_confirmed_at) throw new Error('Verify the email address first (open the link in the confirmation email).');
-  await db.query("insert into public.staff_roles (user_id, role) values ($1, 'admin') on conflict do nothing", [u.id]);
+  await db.query('begin');
+  try {
+    await grantAdminTx(db, u.id, sole);
+    await db.query('commit');
+  } catch (err) {
+    await db.query('rollback');
+    throw err;
+  }
+  console.log(
+    sole
+      ? 'Granted admin and removed every other staff role. Sign in and approve new sign-ups under Admin → Sign-up approvals.'
+      : 'Granted admin. Sign in, then approve new sign-ups under Admin → Sign-up approvals.',
+  );
+}
+
+async function grantAdminTx(db: pg.Client, userId: string, sole: boolean) {
+  await db.query("insert into public.staff_roles (user_id, role) values ($1, 'admin') on conflict do nothing", [userId]);
+  if (sole) {
+    const removed = await db.query('delete from public.staff_roles where user_id <> $1 or role <> $2 returning user_id, role::text', [userId, 'admin']);
+    for (const row of removed.rows) {
+      await db.query(
+        `insert into public.audit_events (actor_type, actor_id, action, subject_type, subject_id, details)
+         values ('system', 'setup-staging', 'staff.role_revoked', 'user', $1, jsonb_build_object('role', $2::text, 'reason', 'sole admin set by operator'))`,
+        [row.user_id, row.role],
+      );
+    }
+  }
   // The first admin has nobody to approve them, so the sign-up is approved here.
   await db.query(
     "update public.user_profiles set account_status = 'active', restriction_reason = null, reviewed_at = now() where user_id = $1 and account_status in ('pending_approval', 'rejected')",
-    [u.id],
+    [userId],
   );
   await db.query(
     `insert into public.audit_events (actor_type, actor_id, action, subject_type, subject_id, details)
      values ('system', 'setup-staging', 'staff.role_granted', 'user', $1, '{"role":"admin"}'::jsonb)`,
-    [u.id],
+    [userId],
   );
-  console.log('Granted admin. Sign in, enrol MFA under Security (staff pages require it), then approve new sign-ups under Admin → Sign-up approvals.');
 }
 
 /** Parses STAGING_DB_URL, explaining a malformed one without ever printing the password. */

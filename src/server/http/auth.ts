@@ -72,11 +72,14 @@ export async function requireUser(): Promise<SessionUser> {
   return user;
 }
 
-/** Staff access: role membership AND an MFA-verified (AAL2) session, checked server-side. */
+/**
+ * Staff access: role membership, checked server-side. Two-factor is optional
+ * for staff (the group's choice); a staff member who has enrolled it must still
+ * complete it every session, as requireUser enforces for everyone.
+ */
 export async function requireStaff(allowed: StaffRole[]): Promise<SessionUser> {
   const user = await requireUser();
   if (!user.roles.some((r) => allowed.includes(r))) throw new AuthError('Not permitted', 403, 'forbidden');
-  if (user.aal !== 'aal2') throw new AuthError('Staff access requires two-factor authentication', 403, 'staff_mfa_required');
   return user;
 }
 
@@ -107,7 +110,6 @@ export async function pageUser(): Promise<SessionUser> {
 export async function pageStaff(allowed: StaffRole[] = STAFF_ANY): Promise<SessionUser> {
   const user = await pageUser();
   if (!user.roles.some((r) => allowed.includes(r))) redirect('/dashboard');
-  if (user.aal !== 'aal2') redirect('/settings/security?notice=staff-mfa');
   return user;
 }
 

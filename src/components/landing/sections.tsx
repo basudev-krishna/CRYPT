@@ -61,7 +61,7 @@ const FACTS = [
   { value: '0', label: 'floating-point operations on money', note: 'bigint base units, 18-dp fixed point' },
   { value: '100%', label: 'of balances derived from the journal', note: 'double-entry, append-only' },
   { value: '1×', label: 'credit per deposit, however often it is retried', note: 'deterministic idempotency keys' },
-  { value: '4-eyes', label: 'on every staff action', note: 'AAL2, audit record, no self-review' },
+  { value: '100%', label: 'of staff actions on the record', note: 'documented reason, audit log, alerts' },
 ];
 
 export function FactStrip() {
@@ -316,7 +316,7 @@ function CheckList({ icon: Icon, title, subtitle, items }: { icon: LucideIcon; t
 /* --------------------------------------------------------------- security */
 
 const SECURITY: { icon: LucideIcon; title: string; body: string }[] = [
-  { icon: KeyRound, title: 'Step-up authentication', body: 'Withdrawals and every staff action require a fresh second factor (AAL2 sessions).' },
+  { icon: KeyRound, title: 'Optional two-factor', body: 'Any member can add an authenticator app; once enabled, every sign-in needs the code.' },
   { icon: Undo2, title: 'Harmless retries', body: 'Jobs, API calls and custody requests are idempotent, so a retry never pays or credits twice.' },
   { icon: Landmark, title: 'Least-privilege database roles', body: 'Web and worker connect as separate roles with column-level grants; row-level security covers client access.' },
   { icon: Gauge, title: 'Hardened HTTP layer', body: 'CSRF protection, rate limits and strict security headers on every route; internal calls are HMAC-signed with nonces.' },

@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import type pg from 'pg';
-import { adminDb, cleanupE2eUsers, PASSWORD } from './helpers';
+import { adminDb, cleanupE2eUsers, createConfirmedUser, login, PASSWORD } from './helpers';
 
 let db: pg.Pool;
 
@@ -25,9 +25,37 @@ async function fillRegister(page: import('@playwright/test').Page, email: string
   await page.getByLabel('Mobile number').fill('98765 43210');
   await page.getByLabel('Password', { exact: true }).fill(PASSWORD);
   await page.getByLabel('Confirm password', { exact: true }).fill(PASSWORD);
-  await page.getByRole('checkbox').check();
   await page.getByRole('button', { name: 'Create account' }).click();
 }
+
+test('a referral link pre-fills the referral id and links the new member to the referrer', async ({ page }) => {
+  const sponsor = await createConfirmedUser(db);
+  const code = (await db.query('select member_code from public.user_profiles where user_id = $1', [sponsor.id])).rows[0].member_code as string;
+
+  // The sponsor's Referrals page shows a link to this site with their id.
+  await login(page, sponsor.email);
+  await page.goto('/referrals');
+  const link = `${new URL(page.url()).origin}/register?ref=${code}`;
+  await expect(page.getByText(link)).toBeVisible();
+  await page.context().clearCookies();
+
+  // An unknown id is refused before any account is created.
+  const stranger = `${randomUUID().slice(0, 8)}@e2e.test.local`;
+  await page.goto('/register?ref=EW-999999');
+  await fillRegister(page, stranger);
+  await expect(page.getByRole('alert').filter({ hasText: 'That referral id was not found.' }).first()).toBeVisible();
+  expect((await db.query('select 1 from auth.users where email = $1', [stranger])).rowCount).toBe(0);
+
+  // Following the real link: the id is pre-filled, and the new profile is permanently linked to the sponsor.
+  const email = `${randomUUID().slice(0, 8)}@e2e.test.local`;
+  await page.goto(link);
+  await expect(page.getByLabel('Referral id (optional)')).toHaveValue(code);
+  await fillRegister(page, email);
+  // "Check your inbox" when email confirmation is on, the approval page when it is off: either way the account exists.
+  await expect(page.getByText('Check your inbox').or(page.getByRole('heading', { name: 'Awaiting approval' }))).toBeVisible({ timeout: 30_000 });
+  const row = await db.query('select p.sponsor_user_id from public.user_profiles p join auth.users u on u.id = p.user_id where u.email = $1', [email]);
+  expect(row.rows[0]?.sponsor_user_id).toBe(sponsor.id);
+});
 
 test('sign-up needs email verification, then admin approval, before the app opens', async ({ page }) => {
   const email = `${randomUUID().slice(0, 8)}@e2e.test.local`;
