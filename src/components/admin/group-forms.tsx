@@ -11,14 +11,17 @@ export interface MemberOption {
 }
 
 /**
- * Allocate an unattributed group-wallet receipt: to one member (assignment) or
- * split across several (distribution). Amounts must add up exactly to the
- * receipt; the server checks this again.
+ * Allocate an unattributed group-wallet receipt: to one member (assignment),
+ * split across several (distribution), or to the operator's referral reward
+ * fund. Amounts must add up exactly to the receipt; the server checks this again.
  */
+type AllocationKind = 'assignment' | 'distribution' | 'referral_fund' | 'operator_float';
+const isTopUp = (k: AllocationKind) => k === 'referral_fund' || k === 'operator_float';
+
 export function AllocationForm({ depositId, amountBase, decimals, members }: { depositId: string; amountBase: string; decimals: number; members: MemberOption[] }) {
   const router = useRouter();
   const total = formatUnits(BigInt(amountBase), decimals);
-  const [kind, setKind] = useState<'assignment' | 'distribution'>('assignment');
+  const [kind, setKind] = useState<AllocationKind>('assignment');
   const [lines, setLines] = useState([{ userId: members[0]?.userId ?? '', amount: total }]);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
@@ -30,15 +33,21 @@ export function AllocationForm({ depositId, amountBase, decimals, members }: { d
   } catch {
     sum = null;
   }
-  const remaining = sum === null ? null : BigInt(amountBase) - sum;
+  const remaining = isTopUp(kind) ? 0n : sum === null ? null : BigInt(amountBase) - sum;
 
   const setLine = (i: number, patch: Partial<{ userId: string; amount: string }>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
   async function submit() {
-    if (!window.confirm(kind === 'assignment' ? 'Credit this deposit to the selected member?' : `Distribute ${total} across ${lines.length} members?`)) return;
+    const prompt =
+      kind === 'assignment'
+        ? 'Credit this deposit to the selected member?'
+        : kind === 'distribution'
+          ? `Distribute ${total} across ${lines.length} members?`
+          : `Add ${total} to the ${kind === 'referral_fund' ? 'referral reward fund' : 'operator float'}? Only send operator money here, never a member's deposit.`;
+    if (!window.confirm(prompt)) return;
     setBusy(true);
     setMsg(null);
-    const r = await apiPost('/api/admin/allocations', { depositId, kind, reason, lines });
+    const r = await apiPost('/api/admin/allocations', { depositId, kind, reason, lines: isTopUp(kind) ? [] : lines });
     setBusy(false);
     if (!r.ok) setMsg({ ok: false, text: r.error ?? 'Failed' });
     else {
@@ -53,15 +62,17 @@ export function AllocationForm({ depositId, amountBase, decimals, members }: { d
         aria-label="Allocation type"
         value={kind}
         onChange={(e) => {
-          const k = e.target.value as 'assignment' | 'distribution';
+          const k = e.target.value as AllocationKind;
           setKind(k);
           if (k === 'assignment') setLines((ls) => [{ userId: ls[0]?.userId ?? '', amount: total }]);
         }}
       >
         <option value="assignment">Assign to one member</option>
         <option value="distribution">Distribute across members</option>
+        <option value="referral_fund">Operator top-up of the referral reward fund</option>
+        <option value="operator_float">Operator top-up of the float (for manual adjustments)</option>
       </Select>
-      {lines.map((l, i) => (
+      {!isTopUp(kind) && lines.map((l, i) => (
         <div key={i} className="flex gap-2">
           <Select aria-label="Member" value={l.userId} onChange={(e) => setLine(i, { userId: e.target.value })} className="min-w-0 flex-1">
             {members.map((m) => (
@@ -88,11 +99,11 @@ export function AllocationForm({ depositId, amountBase, decimals, members }: { d
           </span>
         </div>
       ) : null}
-      <Field label="Reason (shown to the member)" htmlFor={`reason-${depositId}`}>
+      <Field label={isTopUp(kind) ? 'Reason (e.g. who sent it and why)' : 'Reason (shown to the member)'} htmlFor={`reason-${depositId}`}>
         <Textarea id={`reason-${depositId}`} value={reason} onChange={(e) => setReason(e.target.value)} rows={2} />
       </Field>
-      <Button className="h-8 px-3 text-xs" disabled={busy || reason.trim().length < 10 || remaining !== 0n || members.length === 0} onClick={submit}>
-        {busy ? '…' : kind === 'assignment' ? 'Assign' : 'Distribute'}
+      <Button className="h-8 px-3 text-xs" disabled={busy || reason.trim().length < 10 || remaining !== 0n || (!isTopUp(kind) && members.length === 0)} onClick={submit}>
+        {busy ? '…' : kind === 'assignment' ? 'Assign' : kind === 'distribution' ? 'Distribute' : 'Add to operator account'}
       </Button>
       {msg ? <Notice tone={msg.ok ? 'success' : 'danger'}>{msg.text}</Notice> : null}
     </div>

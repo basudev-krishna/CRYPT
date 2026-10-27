@@ -13,6 +13,7 @@ import { Reveal, Stagger, StaggerItem } from '@/components/ui/motion';
 import { baseToChart, dateTime } from '@/lib/format';
 import { RISK_DISCLOSURE_VERSION } from '@/lib/disclosures';
 import { serverEnv } from '@/server/env';
+import { MICRO_DECIMALS, memberHolding } from '@/server/offchain/holdings';
 
 export const metadata: Metadata = { title: 'Overview' };
 
@@ -46,7 +47,12 @@ function ProgressRing({ done, total }: { done: number; total: number }) {
 export default async function DashboardPage() {
   const user = await pageUser();
   const db = webDb();
-  const [d, series, activity] = await Promise.all([getDashboard(db, user.id), getUserSeries(db, user.id, 90), listActivity(db, user.id, 8)]);
+  const [d, series, activity, offPlatform] = await Promise.all([
+    getDashboard(db, user.id),
+    getUserSeries(db, user.id, 90),
+    listActivity(db, user.id, 8),
+    memberHolding(db, user.id),
+  ]);
   const dec = d.token?.decimals ?? 6;
   const sym = d.token?.symbol ?? 'USDT';
   // Group mode: no investment pool, so only balances and activity are shown.
@@ -94,6 +100,18 @@ export default async function DashboardPage() {
         <div className="mb-6">
           <Notice tone="danger" title={`Account ${d.profile.accountStatus}`}>
             {d.profile.restrictionReason ?? 'Some actions are unavailable. Contact support for details.'}
+          </Notice>
+        </div>
+      ) : null}
+
+      {offPlatform ? (
+        <div className="mb-6">
+          <Notice tone="info" title="Held off-platform">
+            The administrator holds <Money value={offPlatform.balance} decimals={MICRO_DECIMALS} symbol="USDT" /> for you outside the group wallet. It is not
+            part of your available balance.{' '}
+            <Link className="text-accent hover:underline" href="/off-platform">
+              View history
+            </Link>
           </Notice>
         </div>
       ) : null}

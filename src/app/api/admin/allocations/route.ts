@@ -7,12 +7,12 @@ import { enqueue } from '@/server/jobs/web-queue';
 
 const schema = z.object({
   depositId: z.uuid(),
-  kind: z.enum(['assignment', 'distribution']),
+  kind: z.enum(['assignment', 'distribution', 'referral_fund', 'operator_float']),
   reason: z.string().trim().min(10).max(1000),
-  lines: z.array(z.object({ userId: z.uuid(), amount: z.string().trim().max(40) })).min(1).max(200),
+  lines: z.array(z.object({ userId: z.uuid(), amount: z.string().trim().max(40) })).max(200),
 });
 
-/** Assign an unattributed group-wallet receipt to a member, or split it as a distribution. The worker posts it. */
+/** Assign an unattributed group-wallet receipt to a member, split it as a distribution, or add it to the referral reward fund. The worker posts it. */
 export const POST = route(async (req) => {
   const staff = await requirePermission('deposit.allocate');
   const input = await body(req, schema);

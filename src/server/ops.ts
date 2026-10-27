@@ -117,13 +117,34 @@ export const allocationPolicySchema = z.object({
 });
 export type AllocationPolicy = z.infer<typeof allocationPolicySchema>;
 
+/**
+ * Operator-funded referral rewards. `reward_amount` is in whole tokens (e.g.
+ * "10" = 10 USDT), converted with the token's decimals when a reward is
+ * recorded. Only referrals of members who joined at or after `program_start`
+ * earn one. Tiers are recognition labels by qualified-referral count; they
+ * carry no money.
+ */
+export const referralPolicySchema = z.object({
+  enabled: z.boolean(),
+  // At most 6 decimals, so the amount fits every supported stablecoin.
+  reward_amount: z.string().regex(/^\d{1,12}(\.\d{1,6})?$/, 'Use at most 6 decimal places'),
+  program_start: z.iso.datetime({ offset: true }),
+  tiers: z
+    .array(z.object({ label: z.string().regex(/^[A-Za-z0-9 ]{1,16}$/), min_qualified: z.number().int().positive() }))
+    .max(20)
+    .refine((t) => t.every((x, i) => i === 0 || x.min_qualified > t[i - 1]!.min_qualified), 'Tier thresholds must increase')
+    .refine((t) => new Set(t.map((x) => x.label)).size === t.length, 'Tier labels must be unique'),
+});
+export type ReferralPolicy = z.infer<typeof referralPolicySchema>;
+
 const schemas = {
   withdrawal: withdrawalPolicySchema,
   deposit: depositPolicySchema,
   fee: feePolicySchema,
   allocation: allocationPolicySchema,
+  referral: referralPolicySchema,
 } as const;
-type PolicyKind = keyof typeof schemas;
+export type PolicyKind = keyof typeof schemas;
 
 export interface VersionedPolicy<T> {
   id: string;

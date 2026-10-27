@@ -420,11 +420,27 @@ export async function listNotifications(db: Db, userId: string, limit = 20) {
   );
 }
 
+/**
+ * Where a referred member stands. A referral qualifies once the account is
+ * approved and has at least one credited deposit; rewards (if any) are decided
+ * later by staff, so nothing here pays anyone.
+ */
+export type ReferralStage = 'awaiting_approval' | 'joined' | 'qualified' | 'inactive';
+
+export function referralStage(accountStatus: string, firstCreditedAt: Date | null): ReferralStage {
+  if (accountStatus === 'pending_approval') return 'awaiting_approval';
+  if (accountStatus !== 'active') return 'inactive';
+  return firstCreditedAt ? 'qualified' : 'joined';
+}
+
+/** Earliest credited deposit (automatic or assigned by an admin) of `p.user_id`. */
+export const FIRST_CREDITED_AT_SQL = `(select min(d.credited_at) from public.deposits d where d.user_id = p.user_id and d.status = 'credited')`;
+
 export interface MembershipView {
   memberCode: string;
   sponsorMemberCode: string | null;
-  /** Members this user vouched for. Member ids only: other members' emails are never shown. */
-  sponsored: { memberCode: string; joinedAt: Date }[];
+  /** Members this user referred. Member ids only: other members' emails and amounts are never shown. */
+  sponsored: { memberCode: string; joinedAt: Date; stage: ReferralStage }[];
 }
 
 export async function getMembership(db: Db, userId: string): Promise<MembershipView | null> {
@@ -436,10 +452,58 @@ export async function getMembership(db: Db, userId: string): Promise<MembershipV
     [userId],
   );
   if (!r) return null;
-  const sponsored = await many<{ member_code: string; created_at: Date }>(
+  const sponsored = await many<{ member_code: string; created_at: Date; account_status: string; first_credited_at: Date | null }>(
     db,
-    'select member_code, created_at from public.user_profiles where sponsor_user_id = $1 order by created_at',
+    `select p.member_code, p.created_at, p.account_status::text as account_status, ${FIRST_CREDITED_AT_SQL} as first_credited_at
+       from public.user_profiles p where p.sponsor_user_id = $1 order by p.created_at`,
     [userId],
   );
-  return { memberCode: r.member_code, sponsorMemberCode: r.sponsor_code, sponsored: sponsored.map((s) => ({ memberCode: s.member_code, joinedAt: s.created_at })) };
+  return {
+    memberCode: r.member_code,
+    sponsorMemberCode: r.sponsor_code,
+    sponsored: sponsored.map((s) => ({ memberCode: s.member_code, joinedAt: s.created_at, stage: referralStage(s.account_status, s.first_credited_at) })),
+  };
+}
+
+export interface ReferralRewardView {
+  id: string;
+  referredMemberCode: string;
+  amountBase: string;
+  symbol: string;
+  decimals: number;
+  status: 'pending' | 'approved' | 'rejected' | 'posted';
+  qualifiedAt: Date;
+  postedAt: Date | null;
+}
+
+/** Referral rewards earned by this user. Rejection notes are shown in notifications, not here. */
+export async function listReferralRewards(db: Db, userId: string): Promise<ReferralRewardView[]> {
+  const rows = await many<{
+    id: string;
+    member_code: string;
+    amount_base: string;
+    symbol: string;
+    decimals: number;
+    status: ReferralRewardView['status'];
+    qualified_at: Date;
+    posted_at: Date | null;
+  }>(
+    db,
+    `select r.id, p.member_code, r.amount_base::text, t.symbol, t.decimals, r.status, r.qualified_at, r.posted_at
+       from public.referral_rewards r
+       join public.user_profiles p on p.user_id = r.referred_user_id
+       join public.supported_tokens t on t.id = r.token_id
+      where r.sponsor_user_id = $1 order by r.created_at desc`,
+    [userId],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    referredMemberCode: r.member_code,
+    amountBase: r.amount_base,
+    symbol: r.symbol,
+    decimals: Number(r.decimals),
+    status: r.status,
+    qualifiedAt: r.qualified_at,
+    postedAt: r.posted_at,
+  }));
 }

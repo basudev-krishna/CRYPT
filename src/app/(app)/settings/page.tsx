@@ -1,11 +1,11 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { pageUser } from '@/server/http/auth';
 import { webDb } from '@/server/db';
 import { getMembership, getProfile } from '@/server/queries/user';
 import { Card, CardHeader, Mono, Notice, PageHeader } from '@/components/ui/primitives';
 import { KycStatus } from '@/components/ui/status';
 import { KycForm, ProfileForm } from '@/components/app/actions';
-import { dateTime } from '@/lib/format';
 
 export const metadata: Metadata = { title: 'Profile & verification' };
 
@@ -41,21 +41,14 @@ export default async function SettingsPage() {
             <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
               <dt className="text-fg-muted">Member id</dt>
               <dd><Mono>{membership.memberCode}</Mono></dd>
-              <dt className="text-fg-muted">Sponsor</dt>
+              <dt className="text-fg-muted">Referred by</dt>
               <dd>{membership.sponsorMemberCode ? <Mono>{membership.sponsorMemberCode}</Mono> : <span className="text-fg-muted">None</span>}</dd>
-              <dt className="text-fg-muted">Members you sponsored</dt>
-              <dd>{membership.sponsored.length}</dd>
+              <dt className="text-fg-muted">Members you referred</dt>
+              <dd>
+                {membership.sponsored.length} ·{' '}
+                <Link className="text-accent hover:underline" href="/referrals">Referrals and your link</Link>
+              </dd>
             </dl>
-            {membership.sponsored.length ? (
-              <ul className="mt-4 space-y-1 text-sm">
-                {membership.sponsored.map((m) => (
-                  <li key={m.memberCode} className="flex justify-between gap-4">
-                    <Mono>{m.memberCode}</Mono>
-                    <span className="text-fg-muted">joined {dateTime(m.joinedAt)}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
           </Card>
         ) : null}
       </div>

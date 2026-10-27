@@ -17,7 +17,9 @@ export type AccountPurpose =
   | 'suspense_deposits'
   | 'fee_revenue'
   | 'network_fee_expense'
-  | 'owner_equity';
+  | 'owner_equity'
+  | 'referral_reward_fund'
+  | 'operator_float';
 
 export type Direction = 'D' | 'C';
 

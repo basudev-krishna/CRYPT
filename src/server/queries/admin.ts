@@ -1,6 +1,7 @@
 /** Read models for the staff console. Callers must have passed requireStaff(). */
 import { many, maybeOne, one, type Db } from '../db-core';
 import { parseBase } from '@/lib/money';
+import { FIRST_CREDITED_AT_SQL, referralStage, type ReferralStage } from './user';
 
 export async function adminOverview(db: Db) {
   const r = await one<{
@@ -86,6 +87,52 @@ export async function adminUsers(db: Db, search: string | null, limit = 50) {
       order by p.created_at desc limit $2`,
     [search, limit],
   );
+}
+
+export interface AdminReferral {
+  userId: string;
+  email: string;
+  memberCode: string;
+  joinedAt: Date;
+  stage: ReferralStage;
+  firstCreditedAt: Date | null;
+  sponsorUserId: string;
+  sponsorEmail: string;
+  sponsorMemberCode: string;
+}
+
+/** Every recorded referral (sponsor link), newest first, with its qualification stage. */
+export async function adminReferrals(db: Db, limit = 500): Promise<AdminReferral[]> {
+  const rows = await many<{
+    user_id: string;
+    email: string;
+    member_code: string;
+    created_at: Date;
+    account_status: string;
+    first_credited_at: Date | null;
+    sponsor_user_id: string;
+    sponsor_email: string;
+    sponsor_code: string;
+  }>(
+    db,
+    `select p.user_id, p.email, p.member_code, p.created_at, p.account_status::text as account_status,
+            ${FIRST_CREDITED_AT_SQL} as first_credited_at,
+            s.user_id as sponsor_user_id, s.email as sponsor_email, s.member_code as sponsor_code
+       from public.user_profiles p join public.user_profiles s on s.user_id = p.sponsor_user_id
+      order by p.created_at desc limit $1`,
+    [limit],
+  );
+  return rows.map((r) => ({
+    userId: r.user_id,
+    email: r.email,
+    memberCode: r.member_code,
+    joinedAt: r.created_at,
+    stage: referralStage(r.account_status, r.first_credited_at),
+    firstCreditedAt: r.first_credited_at,
+    sponsorUserId: r.sponsor_user_id,
+    sponsorEmail: r.sponsor_email,
+    sponsorMemberCode: r.sponsor_code,
+  }));
 }
 
 export async function adminInvitations(db: Db, limit = 100) {
@@ -349,5 +396,63 @@ export async function adminActiveMembers(db: Db) {
     db,
     `select user_id, email, member_code, display_name, username from public.user_profiles
       where account_status = 'active' order by member_code`,
+  );
+}
+
+/** Referral rewards for review, open ones first. */
+export async function adminReferralRewards(db: Db, limit = 200) {
+  return many<{
+    id: string;
+    status: 'pending' | 'approved' | 'rejected' | 'posted';
+    amount_base: string;
+    symbol: string;
+    decimals: number;
+    sponsor_user_id: string;
+    sponsor_email: string;
+    sponsor_code: string;
+    referred_email: string;
+    referred_code: string;
+    qualified_at: Date;
+    created_at: Date;
+    review_note: string | null;
+    reviewed_at: Date | null;
+    posted_at: Date | null;
+    error: string | null;
+    policy_version: number;
+  }>(
+    db,
+    `select r.id, r.status, r.amount_base::text, t.symbol, t.decimals, r.sponsor_user_id, s.email as sponsor_email, s.member_code as sponsor_code,
+            p.email as referred_email, p.member_code as referred_code, r.qualified_at, r.created_at, r.review_note, r.reviewed_at, r.posted_at, r.error,
+            v.version as policy_version
+       from public.referral_rewards r
+       join public.user_profiles s on s.user_id = r.sponsor_user_id
+       join public.user_profiles p on p.user_id = r.referred_user_id
+       join public.supported_tokens t on t.id = r.token_id
+       join public.policy_versions v on v.id = r.policy_version_id
+      order by (r.status in ('pending', 'approved')) desc, r.created_at desc limit $1`,
+    [limit],
+  );
+}
+
+/** Referral reward fund balance per token, with what approved-but-unpaid rewards still need. */
+export async function referralFundBalances(db: Db) {
+  return many<{ token_id: number; symbol: string; decimals: number; balance: string; approved_unpaid: string }>(
+    db,
+    `select t.id as token_id, t.symbol, t.decimals,
+            coalesce((select sum(b.balance) from public.ledger_accounts a join public.account_balances b on b.account_id = a.id
+                       where a.purpose = 'referral_reward_fund' and a.token_id = t.id), 0)::text as balance,
+            coalesce((select sum(r.amount_base) from public.referral_rewards r where r.token_id = t.id and r.status = 'approved'), 0)::text as approved_unpaid
+       from public.supported_tokens t
+      where exists (select 1 from public.ledger_accounts a where a.purpose = 'referral_reward_fund' and a.token_id = t.id)
+         or exists (select 1 from public.referral_rewards r where r.token_id = t.id)
+      order by t.id`,
+  );
+}
+
+/** Referral policy version history, newest first. */
+export async function referralPolicyHistory(db: Db) {
+  return many<{ version: number; params: Record<string, unknown>; change_note: string; created_by: string; created_at: Date }>(
+    db,
+    "select version, params, change_note, created_by, created_at from public.policy_versions where kind = 'referral' order by version desc limit 20",
   );
 }

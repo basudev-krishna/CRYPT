@@ -28,6 +28,8 @@ Each account has a purpose, a token, and an optional user or pool scope (`ledger
 | `pool_fees_payable` | liability | accrued management and performance fees |
 | `suspense_deposits` | liability | confirmed receipts not yet credited (under review / recovery) |
 | `fee_revenue`, `network_fee_expense`, `owner_equity` | revenue / expense / equity | platform accounts |
+| `referral_reward_fund` | liability | operator money set aside for referral rewards; may never go negative |
+| `operator_float` | liability | operator money backing manual adjustments; may never go negative |
 
 Customer-owned purposes may never go negative. The `ledger.apply_line` trigger enforces this inside the posting transaction.
 
@@ -63,6 +65,11 @@ Distinct customer figures:
 | Withdrawal reserved | D `user_cash` / C `user_reserved` |
 | Withdrawal settled | D `user_reserved` / C `treasury_hot` (net) and C `fee_revenue` (fee) |
 | Withdrawal released (proven not executed) | D `user_reserved` / C `user_cash` |
+| Referral fund top-up (operator receipt allocated by admin) | D `suspense_deposits` / C `referral_reward_fund` |
+| Referral reward paid (admin-approved, worker-posted) | D `referral_reward_fund` / C `user_cash` (sponsor) |
+| Operator float top-up (operator receipt allocated by admin) | D `suspense_deposits` / C `operator_float` |
+| Manual credit (member paid the admin personally) | D `operator_float` / C `user_cash` |
+| Manual debit (admin paid the member personally) | D `user_cash` / C `operator_float` |
 
 Deposits, subscriptions, redemptions and withdrawals are **capital flows**. They never pass through mark-to-market, so they never show up as investment profit or loss (`tests/integration/valuation-scenarios.test.ts`).
 
@@ -90,3 +97,9 @@ Hand-computed scenarios (profitable, losing, unchanged, fees, late subscriber, r
 - venue equity vs ledger pool assets (a warning only).
 
 Any blocking failure records a `discrepancy`, raises a critical risk event and **automatically pauses withdrawals**. Payouts are also held when the latest finished run is a discrepancy, an error, or older than 6 hours.
+
+## Off-platform holdings (memo ledger)
+
+Money a member hands the administrator personally is in no platform wallet, so it is **not** in the double-entry ledger. Crediting it as `user_cash` would make customer liabilities exceed on-chain assets: reconciliation would report insolvency and pause withdrawals, and the money would be paid out of other members' deposits.
+
+It is kept in `offchain_entries` instead: append-only, signed micro-USDT per holder, a non-negative balance enforced in the database, and corrections only by reversal (once per entry). Entry kinds are contribution (+), earnings (+), payback (−), adjustment (±), reversal, and `moved_to_platform` (−). The last is bound one-to-one to a posted group-wallet assignment for the same member and takes its exact amount. This is how part of an off-platform balance becomes withdrawable cash: the money actually arrives in the group wallet first (`tests/integration/offchain.test.ts`).

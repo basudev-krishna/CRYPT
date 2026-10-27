@@ -56,16 +56,26 @@ export const web = new pg.Pool({ connectionString: requireLocal(process.env.DATA
 
 const APP_TABLES = [
   'journal_lines', 'journal_entries', 'account_balances', 'ledger_accounts',
-  'deposits', 'chain_transactions', 'network_scan_state', 'deposit_addresses', 'member_wallets', 'sim_chain_transfers',
+  'deposits', 'chain_transactions', 'network_scan_state', 'deposit_addresses', 'member_wallets', 'sim_chain_transfers', 'allocations', 'allocation_lines',
   'investment_orders', 'investment_positions', 'performance_allocations', 'portfolio_valuations',
   'trade_executions', 'trade_import_batches', 'sim_venue_executions', 'treasury_transfers',
   'withdrawal_transactions', 'withdrawal_destinations', 'withdrawal_requests',
   'treasury_snapshots', 'reconciliation_runs', 'risk_events', 'audit_events', 'notification_events',
-  'rate_limits', 'internal_request_nonces', 'kyc_records', 'staff_roles', 'member_invitations',
+  'rate_limits', 'internal_request_nonces', 'kyc_records', 'staff_roles', 'member_invitations', 'referral_rewards', 'offchain_entries', 'offchain_holders', 'manual_adjustments', 'sponsor_changes', 'placement_history', 'binary_placements',
 ];
 
 export async function resetAppData(): Promise<void> {
-  await admin.query(`truncate ${APP_TABLES.map((t) => `public.${t}`).join(', ')} restart identity cascade`);
+  try {
+    await admin.query(`truncate ${APP_TABLES.map((t) => `public.${t}`).join(', ')} restart identity cascade`);
+  } catch (err) {
+    // 42P01 undefined table: the test database is behind the migrations in supabase/migrations.
+    if ((err as { code?: string }).code === '42P01') {
+      throw new Error(`Test database schema is out of date (${(err as Error).message}). Apply the latest migrations to it first, e.g. npx supabase db push --db-url "$DATABASE_URL_ADMIN".`);
+    }
+    throw err;
+  }
+  // Referral policies are test-made (seed has none). Policies are immutable, so bypass the trigger here only.
+  await admin.query("begin; set local session_replication_role = replica; delete from public.policy_versions where kind = 'referral'; commit;");
   await admin.query("update public.system_controls set enabled = false, reason = null");
   await admin.query('update public.treasury_wallets set receives_deposits = false');
   await admin.query('update public.investment_pools set high_water_mark = inception_navpu');
@@ -78,12 +88,12 @@ export async function closePools(): Promise<void> {
   await Promise.all([admin.end(), worker.end(), web.end()]);
 }
 
-export async function createUser(opts: { kyc?: 'approved' | 'pending' | 'none'; status?: string } = {}): Promise<string> {
+export async function createUser(opts: { kyc?: 'approved' | 'pending' | 'none'; status?: string; referralCode?: string } = {}): Promise<string> {
   const id = randomUUID();
   await admin.query(
     `insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data)
-     values ($1, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', $2, '', now(), now(), now(), '{}', '{}')`,
-    [id, `${id.slice(0, 8)}@test.local`],
+     values ($1, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', $2, '', now(), now(), now(), '{}', $3)`,
+    [id, `${id.slice(0, 8)}@test.local`, opts.referralCode ? { referral_code: opts.referralCode } : {}],
   );
   if ((opts.kyc ?? 'approved') !== 'none') {
     await admin.query("insert into public.kyc_records (user_id, status, full_name, submitted_at) values ($1, $2, 'Test User', now())", [id, opts.kyc ?? 'approved']);

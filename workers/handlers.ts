@@ -14,6 +14,8 @@ import { getPool } from '../src/server/investment/orders';
 import { expireUnconfirmed, listOpenWithdrawalIds, monitorWithdrawal, processWithdrawal, type PayoutDeps } from '../src/server/withdrawals/service';
 import { runReconciliation, sweepDeposits } from '../src/server/treasury/reconciliation';
 import { failCorrection, listPendingAllocationIds, listPendingCorrectionIds, postAllocation, postCorrection } from '../src/server/deposits/allocations';
+import { detectReferralRewards, listApprovedReferralRewardIds, postReferralReward } from '../src/server/referrals/rewards';
+import { listPendingAdjustmentIds, postAdjustment } from '../src/server/adjustments/manual';
 import { notify, raiseRiskEvent, serviceActor } from '../src/server/ops';
 import { dispatchRiskAlerts, getAlertSender } from '../src/server/alerts';
 import type { JobPayloads } from '../src/server/jobs/queues';
@@ -59,6 +61,18 @@ export function createHandlers(pool: pg.Pool, enqueue: Enqueue, env: NodeJS.Proc
 
     async allocationPost({ allocationId }: JobPayloads['allocation.post']) {
       await withTransaction(pool, (db) => postAllocation(db, allocationId, serviceActor('allocation-poster')));
+    },
+
+    async adjustmentPost({ adjustmentId }: JobPayloads['adjustment.post']) {
+      await withTransaction(pool, (db) => postAdjustment(db, adjustmentId, serviceActor('adjustment-poster')));
+    },
+
+    /** Record rewards for newly qualified referrals, then pay approved ones (each in its own transaction). */
+    async referralRewards() {
+      await withTransaction(pool, (db) => detectReferralRewards(db));
+      for (const id of await listApprovedReferralRewardIds(pool)) {
+        await withTransaction(pool, (db) => postReferralReward(db, id, serviceActor('referral-rewards')));
+      }
     },
 
     /** A reversal the ledger refuses (e.g. the member already spent the cash) is recorded as failed, not retried forever. */
@@ -138,6 +152,8 @@ export function createHandlers(pool: pg.Pool, enqueue: Enqueue, env: NodeJS.Proc
         for (const id of await listOpenWithdrawalIds(pool, 'broadcast')) await enqueue('withdrawal.monitor', { withdrawalId: id }, { singletonKey: `monitor:${id}` });
         for (const id of await listPendingAllocationIds(pool)) await enqueue('allocation.post', { allocationId: id }, { singletonKey: `allocation:${id}` });
         for (const id of await listPendingCorrectionIds(pool)) await enqueue('correction.post', { correctionId: id }, { singletonKey: `correction:${id}` });
+        for (const id of await listPendingAdjustmentIds(pool)) await enqueue('adjustment.post', { adjustmentId: id }, { singletonKey: `adjustment:${id}` });
+        await enqueue('referral.rewards', {}, { singletonKey: 'referral-rewards' });
         await enqueue('notifications.dispatch', {}, { singletonKey: 'notifications' });
         await enqueue('ops.maintenance', {}, { singletonKey: 'maintenance' });
       } else if (kind === 'medium') {

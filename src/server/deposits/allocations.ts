@@ -3,6 +3,8 @@
  *
  * Accounting
  *   allocate (worker):  D suspense_deposits (receipt amount)  C user_cash (one line per member)
+ *   referral fund:      D suspense_deposits (receipt amount)  C referral_reward_fund (operator money)
+ *   operator float:     D suspense_deposits (receipt amount)  C operator_float (backs manual adjustments)
  *   correct  (worker):  ledger.reverse_entry of the deposit's credit entry, back into suspense
  *
  * An allocation must spend an unattributed receipt that is already received into
@@ -70,11 +72,19 @@ export interface AllocationLineInput {
   amount: string; // decimal string as entered
 }
 
+export type AllocationKind = 'assignment' | 'distribution' | 'referral_fund' | 'operator_float';
+
+/** Operator top-ups: the whole receipt goes to one operator account, with no member lines. */
+const FUND_PURPOSE = { referral_fund: 'referral_reward_fund', operator_float: 'operator_float' } as const;
+const isFundKind = (k: AllocationKind): k is keyof typeof FUND_PURPOSE => k in FUND_PURPOSE;
+
 /**
  * Record an allocation of an unattributed receipt. Pure validation of the
  * split: lines are per distinct member and add up exactly to the receipt.
+ * An operator top-up has no member lines: the whole receipt goes to the fund.
  */
-export function validateSplit(kind: 'assignment' | 'distribution', receipt: bigint, lines: { userId: string; amount: bigint }[]): string | null {
+export function validateSplit(kind: AllocationKind, receipt: bigint, lines: { userId: string; amount: bigint }[]): string | null {
+  if (isFundKind(kind)) return lines.length === 0 ? null : 'An operator top-up has no member lines';
   if (lines.length === 0) return 'Add at least one member';
   if (kind === 'assignment' && lines.length !== 1) return 'An assignment goes to exactly one member';
   if (new Set(lines.map((l) => l.userId)).size !== lines.length) return 'Each member may appear only once';
@@ -86,7 +96,7 @@ export function validateSplit(kind: 'assignment' | 'distribution', receipt: bigi
 
 export async function createAllocation(
   db: Db,
-  args: { depositId: string; kind: 'assignment' | 'distribution'; reason: string; lines: AllocationLineInput[]; staffUserId: string; actor: Actor },
+  args: { depositId: string; kind: AllocationKind; reason: string; lines: AllocationLineInput[]; staffUserId: string; actor: Actor },
 ): Promise<{ id: string }> {
   const reason = args.reason.trim();
   if (reason.length < MIN_REASON) throw new AllocationError(`A reason of at least ${MIN_REASON} characters is required`, 'reason_required');
@@ -143,7 +153,7 @@ export async function postAllocation(db: Db, allocationId: string, actor: Actor)
   const d = await lockDeposit(db, a.deposit_id);
   const lines = await many<{ user_id: string; amount_base: string }>(db, 'select user_id, amount_base::text from public.allocation_lines where allocation_id = $1 order by user_id', [a.id]);
   const parsed = lines.map((l) => ({ userId: l.user_id, amount: parseBase(l.amount_base) }));
-  const problem = unallocatable(d) ?? validateSplit(a.kind as 'assignment' | 'distribution', parseBase(d.amount_base), parsed);
+  const problem = unallocatable(d) ?? validateSplit(a.kind as AllocationKind, parseBase(d.amount_base), parsed);
   if (problem) {
     await db.query("update public.allocations set status = 'failed', error = $2 where id = $1", [a.id, problem]);
     await raiseRiskEvent(db, { kind: 'allocation_failed', severity: 'medium', subjectType: 'allocation', subjectId: a.id, details: { problem } });
@@ -153,10 +163,19 @@ export async function postAllocation(db: Db, allocationId: string, actor: Actor)
   const tokenId = Number(d.token_id);
   const suspense = await ensureAccount(db, 'suspense_deposits', tokenId);
   const entryLines: LedgerLine[] = [{ accountId: suspense, direction: 'D', amount: parseBase(d.amount_base) }];
+  const kind = a.kind as AllocationKind;
+  if (isFundKind(kind)) {
+    entryLines.push({ accountId: await ensureAccount(db, FUND_PURPOSE[kind], tokenId), direction: 'C', amount: parseBase(d.amount_base) });
+  }
   for (const l of parsed) {
     entryLines.push({ accountId: await ensureAccount(db, 'user_cash', tokenId, { userId: l.userId }), direction: 'C', amount: l.amount });
   }
-  const label = a.kind === 'assignment' ? 'Deposit assigned by administrator' : 'Distribution by administrator';
+  const label = {
+    assignment: 'Deposit assigned by administrator',
+    distribution: 'Distribution by administrator',
+    referral_fund: 'Referral reward fund top-up',
+    operator_float: 'Operator float top-up',
+  }[kind];
   const entryId = await postEntry(db, {
     idempotencyKey: `allocation:${a.id}`,
     eventType: 'deposit_allocated',
@@ -173,7 +192,7 @@ export async function postAllocation(db: Db, allocationId: string, actor: Actor)
     `update public.deposits set status = 'credited', status_reason = null, credit_entry_id = $2, credited_at = now(),
             user_id = case when $3::text = 'assignment' then $4::uuid else user_id end
       where id = $1`,
-    [d.id, entryId, a.kind, parsed[0]!.userId],
+    [d.id, entryId, a.kind, parsed[0]?.userId ?? null],
   );
   for (const l of parsed) {
     await notify(db, {

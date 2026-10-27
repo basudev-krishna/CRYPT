@@ -17,6 +17,11 @@ export const PERMISSIONS = {
   'user.restrict': ['admin', 'compliance'],
   'user.approve': ['admin'], // new sign-ups wait for an administrator
   'member.invite': ['admin'], // membership is admin-controlled; also covers revoking
+  'referral.review': ['admin'], // approve or reject a referral reward (operator money)
+  'referral.configure': ['admin'], // referral reward amount, program start and tiers
+  'network.manage': ['admin'], // correct sponsors, place and move members left/right
+  'balance.adjust': ['admin'], // credit/debit a member against the operator float (always alerted)
+  'offchain.record': ['admin'], // off-platform holdings: money members handed the admin personally
   'risk.resolve': ['admin', 'compliance'],
   'control.pause': ['admin', 'operations', 'compliance'], // anyone on duty can stop payouts
   'control.resume': ['admin'], // resuming is exceptional; see canResume()

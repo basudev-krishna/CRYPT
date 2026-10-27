@@ -60,5 +60,8 @@ export const EVENT_LABELS: Record<string, string> = {
   withdrawal_reserved: 'Withdrawal reserved',
   withdrawal_settled: 'Withdrawal sent',
   withdrawal_released: 'Withdrawal released',
+  referral_reward: 'Referral reward',
+  manual_adjustment: 'Adjusted by administrator',
+  referral_bonus: 'Referral bonus',
   reversal: 'Correction (reversal)',
 };
