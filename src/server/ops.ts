@@ -137,12 +137,61 @@ export const referralPolicySchema = z.object({
 });
 export type ReferralPolicy = z.infer<typeof referralPolicySchema>;
 
+/** Whole US dollars with at most 6 decimals, e.g. "1500" or "0.5". */
+const usdAmount = z.string().regex(/^\d{1,12}(\.\d{1,6})?$/, 'Use at most 6 decimal places');
+
+/**
+ * Matching bonus, rank rewards and sign-up team placement. Every amount is
+ * measured in operator-funded earnings only (see reward_base_earnings): never
+ * deposits. Matching and rank payouts are each off until switched on, apply
+ * only from `program_start`, and every reward still needs an administrator's
+ * approval against the funded reward pool.
+ */
+export const rewardsProgramSchema = z
+  .object({
+    program_start: z.iso.datetime({ offset: true }),
+    /** When the chosen side under the sponsor is taken: refuse ('direct') or go down that side's outer edge ('outer'). */
+    placement_mode: z.enum(['direct', 'outer']),
+    matching: z.object({
+      enabled: z.boolean(),
+      /** Whose earnings a member matches: their sponsor line or their placement (team) line. */
+      tree: z.enum(['sponsor', 'placement']),
+      levels: z
+        .array(z.object({ level: z.number().int().min(1).max(10), rate_bps: z.number().int().min(0).max(10_000) }))
+        .min(1)
+        .max(10)
+        .refine((l) => l.every((x, i) => x.level === i + 1), 'Levels must be numbered 1, 2, 3… in order')
+        .refine((l) => l.reduce((s, x) => s + x.rate_bps, 0) <= 10_000, 'All levels together may not exceed 100%'),
+      min_left: usdAmount,
+      min_right: usdAmount,
+      /** Rank a member must have reached before matching pays them; null for none. */
+      min_rank: z.string().nullable(),
+    }),
+    ranks: z.object({
+      rewards_enabled: z.boolean(),
+      /** Token rank bonuses are paid in; required to switch rank rewards on. */
+      token_id: z.number().int().positive().nullable(),
+      levels: z
+        .array(z.object({ code: z.string().regex(/^[A-Za-z0-9]{1,12}$/), left: usdAmount, right: usdAmount, self: usdAmount, bonus: usdAmount }))
+        .min(1)
+        .max(20)
+        .refine((l) => new Set(l.map((x) => x.code)).size === l.length, 'Rank codes must be unique'),
+    }),
+  })
+  .refine((p) => p.matching.min_rank === null || p.ranks.levels.some((r) => r.code === p.matching.min_rank), {
+    message: 'The minimum rank for matching must be one of the ranks',
+    path: ['matching', 'min_rank'],
+  })
+  .refine((p) => !p.ranks.rewards_enabled || p.ranks.token_id !== null, { message: 'Choose the token rank rewards are paid in', path: ['ranks', 'token_id'] });
+export type RewardsProgram = z.infer<typeof rewardsProgramSchema>;
+
 const schemas = {
   withdrawal: withdrawalPolicySchema,
   deposit: depositPolicySchema,
   fee: feePolicySchema,
   allocation: allocationPolicySchema,
   referral: referralPolicySchema,
+  rewards_program: rewardsProgramSchema,
 } as const;
 export type PolicyKind = keyof typeof schemas;
 

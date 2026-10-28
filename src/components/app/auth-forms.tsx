@@ -1,8 +1,8 @@
 'use client';
 import { useRouter } from 'next/navigation';
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
-import { apiPost } from '@/lib/api-client';
+import { apiGet, apiPost } from '@/lib/api-client';
 import { COUNTRIES } from '@/lib/countries';
 import { supabaseBrowser } from '@/lib/supabase/browser';
 import { Button, Field, Input, Notice, Select } from '@/components/ui/primitives';
@@ -73,7 +73,79 @@ export function LoginForm() {
   );
 }
 
-type RegisterField = 'fullName' | 'username' | 'email' | 'phone' | 'countryCode' | 'password' | 'confirm' | 'referralCode';
+type RegisterField = 'fullName' | 'username' | 'email' | 'phone' | 'countryCode' | 'password' | 'confirm' | 'referralCode' | 'teamSide';
+type Side = 'left' | 'right';
+interface Availability {
+  sponsorCode: string;
+  mode: 'direct' | 'outer';
+  direct: Record<Side, boolean>;
+}
+
+const REFERRAL_RE = /^EW-[0-9]{6,}$/;
+
+/** Live availability of each team side under a referral id (null while unknown or invalid); bump `recheck` to ask again. */
+function usePlacement(referralCode: string, recheck: number) {
+  const [state, setState] = useState<{ code: string; availability: Availability | null; error: string | null } | null>(null);
+  const code = referralCode.trim().toUpperCase();
+  useEffect(() => {
+    if (!REFERRAL_RE.test(code)) return;
+    let live = true;
+    const t = setTimeout(async () => {
+      const r = await apiGet<Availability>(`/api/auth/placement?ref=${encodeURIComponent(code)}`);
+      if (live) setState({ code, availability: r.ok ? (r.data ?? null) : null, error: r.ok ? null : (r.error ?? 'Could not check team positions.') });
+    }, 300);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [code, recheck]);
+  return REFERRAL_RE.test(code) && state?.code === code ? state : null;
+}
+
+/** Two equal cards; the applicant must pick one. A side that is taken is shown, never silently swapped. */
+function TeamPositionPicker({ availability, value, onChange, error }: { availability: Availability; value: Side | null; onChange: (s: Side) => void; error?: string }) {
+  return (
+    <fieldset>
+      <legend className="text-sm font-medium text-fg">Choose Your Team Position</legend>
+      <p className="mt-0.5 text-xs text-fg-muted">
+        You will be placed in {availability.sponsorCode}&apos;s team. Your choice is final; only an administrator can correct it later.
+      </p>
+      <div className="mt-3 grid grid-cols-2 gap-3" role="radiogroup" aria-label="Team position">
+        {(['left', 'right'] as const).map((side) => {
+          const open = availability.direct[side];
+          const blocked = !open && availability.mode === 'direct';
+          const selected = value === side;
+          return (
+            <button
+              key={side}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              disabled={blocked}
+              onClick={() => onChange(side)}
+              className={`rounded-xl border p-4 text-left transition ${
+                selected ? 'border-accent bg-accent/5 ring-2 ring-accent/30' : 'border-line bg-white hover:border-accent/50'
+              } disabled:cursor-not-allowed disabled:opacity-50`}
+            >
+              <svg viewBox="0 0 60 36" className="mb-2 h-9 w-16" aria-hidden>
+                <circle cx="30" cy="7" r="5" className="fill-fg-subtle" />
+                <line x1="30" y1="12" x2="12" y2="26" className="stroke-line-strong" strokeWidth="2" />
+                <line x1="30" y1="12" x2="48" y2="26" className="stroke-line-strong" strokeWidth="2" />
+                <circle cx="12" cy="29" r="5" className={side === 'left' ? 'fill-accent' : 'fill-line-strong'} />
+                <circle cx="48" cy="29" r="5" className={side === 'right' ? 'fill-accent' : 'fill-line-strong'} />
+              </svg>
+              <span className="block text-sm font-semibold uppercase tracking-wide">{side} team</span>
+              <span className={`mt-1 block text-xs ${open ? 'text-gain' : blocked ? 'text-loss' : 'text-fg-muted'}`}>
+                {open ? 'Available directly below' : blocked ? 'Taken' : 'Placed further down this side'}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {error ? <p className="mt-2 text-xs text-loss" role="alert">{error}</p> : null}
+    </fieldset>
+  );
+}
 
 export function RegisterForm({ email = '', referralCode = '' }: { email?: string; referralCode?: string }) {
   const router = useRouter();
@@ -81,6 +153,11 @@ export function RegisterForm({ email = '', referralCode = '' }: { email?: string
   const [sent, setSent] = useState(false);
   const [country, setCountry] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<RegisterField, string>>>({});
+  const [refCode, setRefCode] = useState(referralCode);
+  const [side, setSide] = useState<Side | null>(null);
+  const [placed, setPlaced] = useState<{ side: Side; parentCode: string } | null>(null);
+  const [recheck, setRecheck] = useState(0);
+  const placement = usePlacement(refCode, recheck);
   const countries = useMemo(() => {
     const names = new Intl.DisplayNames(undefined, { type: 'region' });
     return COUNTRIES.map(([code, dial]) => ({ code, dial, name: names.of(code) ?? code })).sort((a, b) => a.name.localeCompare(b.name));
@@ -93,17 +170,19 @@ export function RegisterForm({ email = '', referralCode = '' }: { email?: string
     const password = String(f.get('password'));
     setFieldErrors({});
     if (password !== String(f.get('confirm'))) return setFieldErrors({ confirm: 'Passwords do not match.' });
+    if (placement?.availability && !side) return setFieldErrors({ teamSide: 'Choose the left or right team.' });
     const rawPhone = String(f.get('phone')).trim();
     const phone = rawPhone.startsWith('+') || !dial ? rawPhone : `+${dial}${rawPhone.replace(/^0+/, '')}`;
     void run(async () => {
-      const r = await apiPost<{ signedIn: boolean }>('/api/auth/register', {
+      const r = await apiPost<{ signedIn: boolean; placement: { side: Side; parentCode: string } | null }>('/api/auth/register', {
         fullName: String(f.get('fullName')),
         username: String(f.get('username')),
         email: String(f.get('email')),
         phone,
         countryCode: country,
         password,
-        referralCode: String(f.get('referralCode') ?? ''),
+        referralCode: refCode,
+        teamSide: refCode.trim() ? side : null,
       });
       if (!r.ok) {
         if (r.code === 'validation_error') {
@@ -113,9 +192,15 @@ export function RegisterForm({ email = '', referralCode = '' }: { email?: string
         }
         if (r.code === 'username_taken') setFieldErrors({ username: r.error });
         if (r.code === 'referral_not_found') setFieldErrors({ referralCode: r.error });
+        if (r.code === 'position_taken' || r.code === 'team_side_required') {
+          setSide(null);
+          setFieldErrors({ teamSide: r.error });
+          setRecheck((n) => n + 1);
+        }
         throw new Error(r.error ?? 'Registration failed.');
       }
-      // With email confirmation off, Auth signs the user in at once; the app then shows the approval page.
+      // With email confirmation off, Auth signs the user in at once.
+      setPlaced(r.data?.placement ?? null);
       if (r.data?.signedIn) {
         router.replace('/dashboard');
         router.refresh();
@@ -127,7 +212,8 @@ export function RegisterForm({ email = '', referralCode = '' }: { email?: string
   if (sent) {
     return (
       <Notice tone="success" title="Check your inbox">
-        Follow the link in the email to verify your address. An administrator then reviews your account; you can use it once it is approved.
+        {placed ? `You are placed in the ${placed.side} team under ${placed.parentCode}. ` : null}
+        Follow the link in the email to verify your address, then sign in.
         {LOCAL_AUTH ? ' (Local dev: open Mailpit at http://127.0.0.1:54324.)' : null}
       </Notice>
     );
@@ -173,8 +259,24 @@ export function RegisterForm({ email = '', referralCode = '' }: { email?: string
         </Field>
       </div>
       <Field label="Referral id (optional)" htmlFor="referralCode" error={fe.referralCode} hint={fe.referralCode ? undefined : 'Member id of the person who referred you, e.g. EW-000123'}>
-        <Input id="referralCode" name="referralCode" defaultValue={referralCode} autoCapitalize="characters" spellCheck={false} maxLength={12} />
+        <Input
+          id="referralCode"
+          name="referralCode"
+          value={refCode}
+          onChange={(e) => {
+            setRefCode(e.target.value);
+            setSide(null);
+          }}
+          autoCapitalize="characters"
+          spellCheck={false}
+          maxLength={12}
+        />
       </Field>
+      {placement?.availability ? (
+        <TeamPositionPicker availability={placement.availability} value={side} onChange={setSide} error={fe.teamSide} />
+      ) : placement?.error ? (
+        <Notice tone="danger">{placement.error}</Notice>
+      ) : null}
       {error ? <Notice tone="danger">{error}</Notice> : null}
       <Button type="submit" disabled={busy} className="w-full">{busy ? 'Creating account…' : 'Create account'}</Button>
     </form>

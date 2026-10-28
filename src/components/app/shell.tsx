@@ -16,6 +16,7 @@ const USER_NAV: NavItem[] = [
   { href: '/withdraw', label: 'Withdraw', icon: 'withdraw' },
   { href: '/transactions', label: 'Transactions', icon: 'transactions' },
   { href: '/referrals', label: 'Referrals', icon: 'referrals' },
+  { href: '/rewards', label: 'Rank & matching', icon: 'rewards' },
   { href: '/settings', label: 'Profile', icon: 'profile' },
   { href: '/settings/security', label: 'Security', icon: 'security' },
 ];
@@ -25,6 +26,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/approvals', label: 'Sign-up approvals', icon: 'approvals' },
   { href: '/admin/users', label: 'Users', icon: 'users' },
   { href: '/admin/referrals', label: 'Referrals', icon: 'referrals' },
+  { href: '/admin/rewards', label: 'Reward treasury', icon: 'rewardTreasury' },
   { href: '/admin/off-platform', label: 'Off-platform ledger', icon: 'ledger' },
   { href: '/admin/deposits', label: 'Deposits', icon: 'deposit' },
   { href: '/admin/withdrawals', label: 'Withdrawals', icon: 'withdraw' },

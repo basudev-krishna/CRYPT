@@ -13,13 +13,14 @@ export function ReferralStageBadge({ stage }: { stage: ReferralStage }) {
   return <Badge tone={s.tone} title={s.title}>{s.label}</Badge>;
 }
 
-type RewardStatus = 'pending' | 'approved' | 'rejected' | 'posted';
+type RewardStatus = 'pending' | 'approved' | 'rejected' | 'posted' | 'cancelled';
 
 const REWARDS: Record<RewardStatus, { label: string; tone: 'success' | 'warn' | 'info' | 'danger'; title: string }> = {
   pending: { label: 'Pending review', tone: 'warn', title: 'Waiting for an administrator; not withdrawable' },
   approved: { label: 'Approved', tone: 'info', title: 'Approved, paid shortly from the referral fund; not withdrawable yet' },
   posted: { label: 'Paid', tone: 'success', title: 'Credited to available balance' },
   rejected: { label: 'Rejected', tone: 'danger', title: 'Not paid' },
+  cancelled: { label: 'Cancelled', tone: 'danger', title: 'Not paid: the matched earning was reversed' },
 };
 
 export function ReferralRewardStatus({ status }: { status: RewardStatus }) {

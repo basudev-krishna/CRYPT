@@ -21,7 +21,14 @@ describe('registerSchema', () => {
       countryCode: 'IN',
       password: 'Strong-Password-2026',
       referralCode: 'EW-000123',
+      teamSide: null,
     });
+  });
+
+  it('accepts only left or right as the team side', () => {
+    expect(registerSchema.parse({ ...valid, teamSide: 'left' }).teamSide).toBe('left');
+    expect(registerSchema.parse({ ...valid, teamSide: null }).teamSide).toBeNull();
+    expect(registerSchema.safeParse({ ...valid, teamSide: 'middle' }).success).toBe(false);
   });
 
   it('treats a blank or missing referral id as none', () => {

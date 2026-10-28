@@ -1,4 +1,4 @@
-/** Open sign-up with email verification and admin approval, then sign-in. */
+/** Open sign-up with email verification (no admin approval), then sign-in. */
 import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import type pg from 'pg';
@@ -17,7 +17,8 @@ test.afterAll(async () => {
 });
 
 /** Fills the register form; the username is the email's local part. */
-async function fillRegister(page: import('@playwright/test').Page, email: string) {
+async function fillRegister(page: import('@playwright/test').Page, email: string, side?: 'left' | 'right') {
+  if (side) await page.getByRole('radio', { name: new RegExp(`${side} team`, 'i') }).click();
   await page.getByLabel('Full name').fill('E2E Applicant');
   await page.getByLabel('Username').fill(`u_${email.split('@')[0]}`);
   await page.getByLabel('Email').fill(email);
@@ -50,14 +51,18 @@ test('a referral link pre-fills the referral id and links the new member to the 
   const email = `${randomUUID().slice(0, 8)}@e2e.test.local`;
   await page.goto(link);
   await expect(page.getByLabel('Referral id (optional)')).toHaveValue(code);
-  await fillRegister(page, email);
-  // "Check your inbox" when email confirmation is on, the approval page when it is off: either way the account exists.
-  await expect(page.getByText('Check your inbox').or(page.getByRole('heading', { name: 'Awaiting approval' }))).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Choose Your Team Position')).toBeVisible();
+  await fillRegister(page, email, 'left');
+  // "Check your inbox" when email confirmation is on, the dashboard when it is off: either way the account exists.
+  await expect(page.getByText('Check your inbox').or(page.getByRole('heading', { name: 'Your account at a glance' }))).toBeVisible({ timeout: 30_000 });
   const row = await db.query('select p.sponsor_user_id from public.user_profiles p join auth.users u on u.id = p.user_id where u.email = $1', [email]);
   expect(row.rows[0]?.sponsor_user_id).toBe(sponsor.id);
+  // The chosen side was placed with the account.
+  const placed = await db.query('select b.parent_user_id, b.side from public.binary_placements b join auth.users u on u.id = b.user_id where u.email = $1', [email]);
+  expect(placed.rows[0]).toEqual({ parent_user_id: sponsor.id, side: 'left' });
 });
 
-test('sign-up needs email verification, then admin approval, before the app opens', async ({ page }) => {
+test('sign-up needs email verification, and no admin approval, before the app opens', async ({ page }) => {
   const email = `${randomUUID().slice(0, 8)}@e2e.test.local`;
   await page.goto(`/register?email=${encodeURIComponent(email)}`);
   await expect(page.getByLabel('Email')).toHaveValue(email);
@@ -71,28 +76,21 @@ test('sign-up needs email verification, then admin approval, before the app open
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByText('Please verify your email address first.')).toBeVisible();
 
-  // Verified but not yet approved: every app page sends the user to the waiting page.
+  // Once verified, the account is active and the app opens straight away.
   await db.query('update auth.users set email_confirmed_at = now() where email = $1', [email]);
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page).toHaveURL(/\/pending-approval/, { timeout: 30_000 });
-  await expect(page.getByRole('heading', { name: 'Awaiting approval' })).toBeVisible();
-  await page.goto('/deposit');
-  await expect(page).toHaveURL(/\/pending-approval/);
-  const api = await page.request.post('/api/profile', { data: { displayName: 'Too early', countryCode: null }, headers: { origin: new URL(page.url()).origin } });
-  expect(api.status()).toBe(403);
-
-  await db.query("update public.user_profiles set account_status = 'active', reviewed_at = now() where email = $1", [email]);
+  await expect(page).toHaveURL(/\/dashboard/, { timeout: 30_000 });
+  expect((await db.query('select account_status::text as s from public.user_profiles where email = $1', [email])).rows[0]?.s).toBe('active');
   await page.goto('/settings');
   await expect(page.getByText(/^EW-\d{6}$/)).toBeVisible();
 });
 
-test('approved members can sign in with their username', async ({ page }) => {
+test('new members can sign in with their username', async ({ page }) => {
   const email = `${randomUUID().slice(0, 8)}@e2e.test.local`;
   await page.goto('/register');
   await fillRegister(page, email);
   await expect(page.getByText('Check your inbox')).toBeVisible({ timeout: 30_000 });
   await db.query('update auth.users set email_confirmed_at = now() where email = $1', [email]);
-  await db.query("update public.user_profiles set account_status = 'active', reviewed_at = now() where email = $1", [email]);
   await page.goto('/login');
   await page.getByLabel('Username or email').fill(`U_${email.slice(0, 8).toUpperCase()}`);
   await page.getByLabel('Password', { exact: true }).fill(PASSWORD);

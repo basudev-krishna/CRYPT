@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { Hero } from '@/components/landing/hero';
-import { FactStrip, FinalCta, Footer, GroupStatus, HowItWorks, NavExplainer, NetworksAndStatus, Pillars, Security, WithdrawalControls } from '@/components/landing/sections';
+import { AboutEliteWhale, FactStrip, FinalCta, Footer, GroupStatus, HowItWorks, NavExplainer, NetworksAndStatus, Pillars, Security, WithdrawalControls } from '@/components/landing/sections';
 import { getSessionUser } from '@/server/http/auth';
 import { realFundsActive } from '@/server/phase-guard';
 
@@ -8,7 +8,7 @@ export function generateMetadata(): Metadata {
   if (realFundsActive()) {
     return {
       title: { absolute: 'EliteWhale · Private USDT investment group' },
-      description: 'A private USDT investment group on BNB Smart Chain, run on an auditable double-entry ledger. New members are approved by the administrator.',
+      description: 'A private USDT investment group on BNB Smart Chain, run on an auditable double-entry ledger.',
       openGraph: { title: 'EliteWhale', description: 'A private USDT investment group run on an auditable ledger.', type: 'website' },
     };
   }
@@ -34,6 +34,7 @@ export default async function LandingPage() {
     <div className="landing" style={{ fontFamily: 'var(--font-body)', color: 'var(--color-text)', background: 'var(--color-login-bg)' }}>
       <Hero signedIn={signedIn} realFunds={realFunds} />
       <main>
+        <AboutEliteWhale realFunds={realFunds} />
         <FactStrip />
         <HowItWorks realFunds={realFunds} />
         <Pillars />

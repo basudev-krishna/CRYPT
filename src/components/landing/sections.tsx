@@ -54,6 +54,69 @@ function IconBadge({ icon: Icon }: { icon: LucideIcon }) {
   );
 }
 
+/* ------------------------------------------------------------------ about */
+
+const ABOUT = {
+  group: {
+    title: 'A private USDT group, kept on a ledger you can check.',
+    paragraphs: [
+      'EliteWhale is a private group whose members pool USDT on BNB Smart Chain. Deposits go to one group wallet that this app only watches: it holds no keys and cannot move the money.',
+      'The administrator keeps the group ledger here. Every deposit, payout, reward and correction is a balanced, permanent entry, and each member sees their own balance and full history.',
+    ],
+    points: [
+      { icon: Wallet, title: 'Watched group wallet', body: 'Each deposit is matched to you by your signed sending wallet and credited only after enough confirmations.' },
+      { icon: KeyRound, title: 'Payouts signed by the administrator', body: 'Withdrawals are paid by hand from the group wallet, and each payout is checked against the chain.' },
+      { icon: BadgeCheck, title: 'Rewards from the operator only', body: 'Referral, matching and rank rewards come from a reward pool the operator funds. Deposits are never used to pay them.' },
+      { icon: Scale, title: 'No promised returns', body: 'EliteWhale is not a bank and guarantees no income. Balances show what is actually recorded, losses included.' },
+    ],
+  },
+  testnet: {
+    title: 'An investment ledger you can follow end to end.',
+    paragraphs: [
+      'EliteWhale is a testnet demonstration of how a pooled USDT investment can be run in the open: deposits, a unitized pool valued from trade executions, and withdrawals that pass policy checks.',
+      'Everything runs on test tokens with a simulated trading venue. No real funds are involved, so you can try every step and inspect the ledger behind it.',
+    ],
+    points: [
+      { icon: BookLock, title: 'One source of truth', body: 'Balances, statements and the operator view all read from the same double-entry journal.' },
+      { icon: LineChart, title: 'Results from executions', body: 'The pool is valued from imported trades and prices. No fixed rates.' },
+      { icon: ShieldCheck, title: 'Checks before payouts', body: 'Limits, screening and reconciliation must all pass before money leaves.' },
+      { icon: Scale, title: 'No promised returns', body: 'Simulated results are labelled as simulated, and losses are shown.' },
+    ],
+  },
+} as const;
+
+export function AboutEliteWhale({ realFunds }: { realFunds: boolean }) {
+  const a = realFunds ? ABOUT.group : ABOUT.testnet;
+  return (
+    <section id="about" aria-labelledby="about-title" className={`${container} scroll-mt-8 py-20 sm:py-28`}>
+      <div className="grid gap-12 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: 'var(--color-accent)' }}>
+            About EliteWhale
+          </p>
+          <h2 id="about-title" className="mt-3" style={{ ...headingStyle, fontSize: 'clamp(1.5rem, 3.5vw, 2.4rem)' }}>
+            {a.title}
+          </h2>
+          {a.paragraphs.map((p) => (
+            <p key={p} className="mt-4 text-[15px] leading-relaxed opacity-75 sm:text-base">
+              {p}
+            </p>
+          ))}
+        </div>
+        <ul className="grid gap-4 sm:grid-cols-2">
+          {a.points.map((p) => (
+            <li key={p.title} className={`${card} p-6`}>
+              <IconBadge icon={p.icon} />
+              <h3 className="mt-4 text-base font-semibold">{p.title}</h3>
+              <p className="mt-1.5 text-sm leading-relaxed opacity-75">{p.body}</p>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  );
+}
+
 /* ------------------------------------------------------------------ facts */
 
 const FACTS = [
@@ -473,7 +536,7 @@ export function GroupStatus() {
           <div className="rounded-3xl p-7" style={{ background: 'rgba(115,66,226,0.08)' }}>
             <h3 className="text-lg font-semibold">What this is not</h3>
             <ul className="mt-3 list-disc space-y-1.5 pl-5 text-[15px] opacity-75">
-              <li>It is not a public offering. Membership is private and every sign-up is approved by the administrator.</li>
+              <li>It is not a public offering. Membership is private to the group.</li>
               <li>It is not licensed, independently audited or penetration tested.</li>
               <li>It does not guarantee any return. Real money is involved and you can lose some or all of it.</li>
             </ul>
