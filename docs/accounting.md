@@ -67,6 +67,7 @@ Distinct customer figures:
 | Withdrawal released (proven not executed) | D `user_reserved` / C `user_cash` |
 | Referral fund top-up (operator receipt allocated by admin) | D `suspense_deposits` / C `referral_reward_fund` |
 | Referral reward paid (admin-approved, worker-posted) | D `referral_reward_fund` / C `user_cash` (sponsor) |
+| Matching bonus or rank reward paid (admin-approved against the funded pool, worker-posted, event `program_reward`) | D `referral_reward_fund` / C `user_cash` (beneficiary) |
 | Operator float top-up (operator receipt allocated by admin) | D `suspense_deposits` / C `operator_float` |
 | Manual credit (member paid the admin personally) | D `operator_float` / C `user_cash` |
 | Manual debit (admin paid the member personally) | D `user_cash` / C `operator_float` |

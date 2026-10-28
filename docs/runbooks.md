@@ -469,7 +469,7 @@ The deposit's risk events are resolved with notes. Suspense equals the sum of re
 
 ## 6. Membership invitations
 
-> **Currently switched off (2026-10-23).** Sign-up is open and every new account waits in Admin → Sign-up approvals (`/admin/approvals`, permission `user.approve`, admin only) until an administrator approves or rejects it with a documented note (audited as `user.signup.approved` / `user.signup.rejected`; self-review is refused). Pending and rejected accounts can sign in but only see `/pending-approval`. The invitation gate trigger was dropped in `20261023000200_signup_approval.sql`; the tables and the procedure below are kept for when it is switched back on.
+> **Currently switched off (2026-10-23).** Sign-up is open. Since 2026-10-28 (`20261028000100_signup_approval_not_required.sql`) new accounts start active with no admin approval; accounts rejected earlier can still be approved in Admin → Sign-up approvals. Before that, every new account waited in Admin → Sign-up approvals (`/admin/approvals`, permission `user.approve`, admin only) until an administrator approves or rejects it with a documented note (audited as `user.signup.approved` / `user.signup.rejected`; self-review is refused). Pending and rejected accounts can sign in but only see `/pending-approval`. The invitation gate trigger was dropped in `20261023000200_signup_approval.sql`; the tables and the procedure below are kept for when it is switched back on.
 
 Membership is invitation-only. Members, invitations and offboarding are managed at Admin → Invitations (`/admin/members`) and Admin → Users.
 

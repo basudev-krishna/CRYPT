@@ -47,6 +47,13 @@ export async function cleanupE2eUsers(db: pg.Pool) {
       "delete from public.member_invitations where email like '%@e2e.test.local' or accepted_user_id = any($1::uuid[]) or sponsor_user_id = any($1::uuid[])",
       [ids],
     );
+    // Sign-up team positions and their append-only history (test rows only).
+    await client.query(
+      `delete from public.placement_history
+        where user_id = any($1::uuid[]) or changed_by = any($1::uuid[]) or old_parent_id = any($1::uuid[]) or new_parent_id = any($1::uuid[])`,
+      [ids],
+    );
+    await client.query('delete from public.binary_placements where user_id = any($1::uuid[]) or parent_user_id = any($1::uuid[]) or placed_by = any($1::uuid[])', [ids]);
     await client.query('commit');
   } catch (err) {
     await client.query('rollback');

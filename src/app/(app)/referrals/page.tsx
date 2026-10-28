@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { pageUser } from '@/server/http/auth';
 import { webDb } from '@/server/db';
 import { getMembership, listReferralRewards } from '@/server/queries/user';
@@ -87,7 +88,12 @@ export default async function ReferralsPage() {
       <Card className="mt-6">
         <CardHeader
           title="Your team"
-          subtitle={tree ? `Left team ${tree.leftCount} · Right team ${tree.rightCount}. Positions are set by the administrator.` : undefined}
+          subtitle={
+            tree
+              ? `Left team ${tree.leftCount} · Right team ${tree.rightCount}. Members who join with your referral id choose their side; only an administrator can move a position.`
+              : undefined
+          }
+          action={<Link className="text-xs font-medium text-accent hover:underline" href="/rewards">Rank &amp; matching →</Link>}
         />
         {tree && (tree.left || tree.right) ? <TeamTree node={tree} /> : <EmptyState title="No team members placed yet" />}
       </Card>

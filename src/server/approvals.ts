@@ -1,10 +1,9 @@
 /**
  * Admin approval of new sign-ups.
  *
- * Accounts created through Supabase Auth start as 'pending_approval' (set by
- * the auth trigger in the database). Until an administrator approves them they
- * can sign in but every customer page and API refuses them, and deposits,
- * orders and withdrawals require an active account anyway.
+ * Since 20261028000100_signup_approval_not_required.sql new sign-ups start
+ * 'active', so nothing new enters the queue. This remains for accounts that
+ * were rejected earlier: an administrator can still approve them here.
  */
 import { many, type Db } from './db-core';
 import { notify, recordAudit, type Actor } from './ops';

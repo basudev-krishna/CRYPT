@@ -61,7 +61,7 @@ const APP_TABLES = [
   'trade_executions', 'trade_import_batches', 'sim_venue_executions', 'treasury_transfers',
   'withdrawal_transactions', 'withdrawal_destinations', 'withdrawal_requests',
   'treasury_snapshots', 'reconciliation_runs', 'risk_events', 'audit_events', 'notification_events',
-  'rate_limits', 'internal_request_nonces', 'kyc_records', 'staff_roles', 'member_invitations', 'referral_rewards', 'offchain_entries', 'offchain_holders', 'manual_adjustments', 'sponsor_changes', 'placement_history', 'binary_placements',
+  'rate_limits', 'internal_request_nonces', 'kyc_records', 'staff_roles', 'member_invitations', 'referral_rewards', 'offchain_entries', 'offchain_holders', 'manual_adjustments', 'sponsor_changes', 'placement_history', 'binary_placements', 'program_rewards', 'matching_sources', 'rank_achievements',
 ];
 
 export async function resetAppData(): Promise<void> {
@@ -75,7 +75,7 @@ export async function resetAppData(): Promise<void> {
     throw err;
   }
   // Referral policies are test-made (seed has none). Policies are immutable, so bypass the trigger here only.
-  await admin.query("begin; set local session_replication_role = replica; delete from public.policy_versions where kind = 'referral'; commit;");
+  await admin.query("begin; set local session_replication_role = replica; delete from public.policy_versions where kind in ('referral', 'rewards_program'); commit;");
   await admin.query("update public.system_controls set enabled = false, reason = null");
   await admin.query('update public.treasury_wallets set receives_deposits = false');
   await admin.query('update public.investment_pools set high_water_mark = inception_navpu');
@@ -88,12 +88,12 @@ export async function closePools(): Promise<void> {
   await Promise.all([admin.end(), worker.end(), web.end()]);
 }
 
-export async function createUser(opts: { kyc?: 'approved' | 'pending' | 'none'; status?: string; referralCode?: string } = {}): Promise<string> {
+export async function createUser(opts: { kyc?: 'approved' | 'pending' | 'none'; status?: string; referralCode?: string; side?: 'left' | 'right' } = {}): Promise<string> {
   const id = randomUUID();
   await admin.query(
     `insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data)
      values ($1, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', $2, '', now(), now(), now(), '{}', $3)`,
-    [id, `${id.slice(0, 8)}@test.local`, opts.referralCode ? { referral_code: opts.referralCode } : {}],
+    [id, `${id.slice(0, 8)}@test.local`, { ...(opts.referralCode ? { referral_code: opts.referralCode } : {}), ...(opts.side ? { team_side: opts.side } : {}) }],
   );
   if ((opts.kyc ?? 'approved') !== 'none') {
     await admin.query("insert into public.kyc_records (user_id, status, full_name, submitted_at) values ($1, $2, 'Test User', now())", [id, opts.kyc ?? 'approved']);

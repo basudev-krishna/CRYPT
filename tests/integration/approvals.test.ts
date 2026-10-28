@@ -49,6 +49,8 @@ async function authSignUp(addr: string, meta: Record<string, unknown> = {}): Pro
 }
 
 const status = async (id: string) => (await one<{ s: string }>(admin, 'select account_status::text as s from public.user_profiles where user_id = $1', [id])).s;
+/** Accounts no longer start pending; put one back in the queue to exercise the review path. */
+const setPending = (id: string) => admin.query("update public.user_profiles set account_status = 'pending_approval' where user_id = $1", [id]);
 const decide = (actor: Actor, userId: string, decision: 'approve' | 'reject', note = 'Identity confirmed by phone') =>
   withTransaction(web, (db) => decideSignup(db, actor, { userId, decision, note }));
 
@@ -59,9 +61,9 @@ async function staffActor(): Promise<Actor> {
 }
 
 describe('sign-up', () => {
-  itAuth('needs no invitation, and puts Supabase Auth sign-ups in the approval queue', async () => {
+  itAuth('needs no invitation or admin approval: Supabase Auth sign-ups start active', async () => {
     const id = await authSignUp(email());
-    expect(await status(id)).toBe('pending_approval');
+    expect(await status(id)).toBe('active');
   });
 
   it('starts trusted superuser inserts (seed, tests) as active', async () => {
@@ -70,6 +72,7 @@ describe('sign-up', () => {
 
   itAuth('blocks deposits for a pending account', async () => {
     const id = await authSignUp(email());
+    await setPending(id);
     const net = await simNetwork();
     await expect(getDepositInstructions(worker, new SimulatedCustodyProvider(worker), id, net.id, { type: 'user', id })).rejects.toMatchObject({ code: 'account_restricted' });
   });
@@ -109,6 +112,7 @@ describe('decideSignup', () => {
   itAuth('approves a pending account, records who and when, and audits the note', async () => {
     const staff = await staffActor();
     const id = await authSignUp(email());
+    await setPending(id);
     await expect(decide(staff, id, 'approve')).resolves.toEqual({ status: 'active' });
     const p = await one<{ s: string; reviewed_by: string; reviewed_at: Date | null; reason: string | null }>(
       admin,
@@ -124,6 +128,7 @@ describe('decideSignup', () => {
   itAuth('rejects with the note as the reason, and allows a later approval', async () => {
     const staff = await staffActor();
     const id = await authSignUp(email());
+    await setPending(id);
     await decide(staff, id, 'reject', 'Unable to verify the applicant');
     expect(await status(id)).toBe('rejected');
     // Rejecting twice is refused; reconsidering is allowed.
@@ -140,6 +145,7 @@ describe('decideSignup', () => {
     expect(await status(active)).toBe('active');
 
     const id = await authSignUp(email());
+    await setPending(id);
     await expect(decide(staff, staff.id, 'approve')).rejects.toMatchObject({ code: 'conflict_of_interest' });
     await expect(decide({ type: 'user', id: randomUUID() }, id, 'approve')).rejects.toMatchObject({ code: 'not_staff' });
     await expect(decide(staff, id, 'approve', 'ok')).rejects.toMatchObject({ code: 'note_required' });
@@ -149,6 +155,7 @@ describe('decideSignup', () => {
   itAuth('lets exactly one of two concurrent decisions win', async () => {
     const [a, b] = await Promise.all([staffActor(), staffActor()]);
     const id = await authSignUp(email());
+    await setPending(id);
     const results = await Promise.allSettled([decide(a, id, 'approve'), decide(b, id, 'reject', 'Duplicate account found')]);
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     const audits = await one<{ n: number }>(admin, "select count(*)::int as n from public.audit_events where action like 'user.signup.%' and subject_id = $1", [id]);

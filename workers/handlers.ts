@@ -15,6 +15,7 @@ import { expireUnconfirmed, listOpenWithdrawalIds, monitorWithdrawal, processWit
 import { runReconciliation, sweepDeposits } from '../src/server/treasury/reconciliation';
 import { failCorrection, listPendingAllocationIds, listPendingCorrectionIds, postAllocation, postCorrection } from '../src/server/deposits/allocations';
 import { detectReferralRewards, listApprovedReferralRewardIds, postReferralReward } from '../src/server/referrals/rewards';
+import { detectMatchingRewards, evaluateRanks, listApprovedProgramRewardIds, postProgramReward } from '../src/server/referrals/program';
 import { listPendingAdjustmentIds, postAdjustment } from '../src/server/adjustments/manual';
 import { notify, raiseRiskEvent, serviceActor } from '../src/server/ops';
 import { dispatchRiskAlerts, getAlertSender } from '../src/server/alerts';
@@ -67,11 +68,19 @@ export function createHandlers(pool: pg.Pool, enqueue: Enqueue, env: NodeJS.Proc
       await withTransaction(pool, (db) => postAdjustment(db, adjustmentId, serviceActor('adjustment-poster')));
     },
 
-    /** Record rewards for newly qualified referrals, then pay approved ones (each in its own transaction). */
+    /**
+     * Record referral, matching and rank rewards that became due, then pay the
+     * approved ones (each in its own transaction).
+     */
     async referralRewards() {
       await withTransaction(pool, (db) => detectReferralRewards(db));
+      await withTransaction(pool, (db) => detectMatchingRewards(db));
+      await withTransaction(pool, (db) => evaluateRanks(db));
       for (const id of await listApprovedReferralRewardIds(pool)) {
         await withTransaction(pool, (db) => postReferralReward(db, id, serviceActor('referral-rewards')));
+      }
+      for (const id of await listApprovedProgramRewardIds(pool)) {
+        await withTransaction(pool, (db) => postProgramReward(db, id, serviceActor('program-rewards')));
       }
     },
 
