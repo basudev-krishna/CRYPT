@@ -4,21 +4,29 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { AnimatePresence, MotionConfig, motion, type Variants } from 'framer-motion';
-import { ArrowRightCircle, Fingerprint, LockKeyhole, Menu, Waves, X } from 'lucide-react';
+import { ArrowRight, Menu, X } from 'lucide-react';
 
-const VIDEO_SRC = 'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260518_003132_8b7edcb6-c64d-4a52-a9ca-879942e122ad.mp4';
 const EASE = [0.22, 1, 0.36, 1] as const;
 
+/* Gold palette taken from the logo, on a near-black navy ground. */
+const IVORY = '#f6efdf';
+const GOLD = '#d9b25f';
+const GOLD_TEXT = 'linear-gradient(180deg, #fbeec4 0%, #e8c46f 42%, #b9862f 78%, #8f6420 100%)';
+const GOLD_FILL = 'linear-gradient(135deg, #f7e2a6 0%, #dcb35c 45%, #b8862f 100%)';
+const HERO_BG =
+  'radial-gradient(ellipse 60% 55% at 72% 42%, rgba(217,178,95,0.20) 0%, rgba(217,178,95,0) 70%), radial-gradient(ellipse 50% 40% at 10% 0%, rgba(80,96,140,0.25) 0%, rgba(80,96,140,0) 70%), linear-gradient(180deg, #06080d 0%, #0b1120 55%, #070a12 100%)';
+
 const NAV_LINKS = [
-  { label: 'How it works', href: '#how-it-works' },
-  { label: 'Valuation', href: '#nav' },
-  { label: 'Withdrawals', href: '#controls' },
-  { label: 'Security', href: '#security' },
+  { label: 'About', href: '#about' },
+  { label: 'Roadmap', href: '#roadmap' },
+  { label: 'Projects', href: '#projects' },
+  { label: 'Revenue', href: '#revenue' },
+  { label: 'Support', href: '#support' },
 ];
 
 const fadeUp: Variants = {
   hidden: { opacity: 0, y: 28 },
-  visible: (i: number) => ({ opacity: 1, y: 0, transition: { delay: i * 0.15, duration: 0.6, ease: EASE } }),
+  visible: (i: number) => ({ opacity: 1, y: 0, transition: { delay: i * 0.15, duration: 0.7, ease: EASE } }),
 };
 
 /** The EliteWhale mark (public/logo.png, 3:2). `size` is its height; the width follows the image's aspect ratio. */
@@ -31,27 +39,33 @@ function Logo({ realFunds }: { realFunds: boolean }) {
     <Link href="/" className="flex items-center gap-2.5" aria-label="EliteWhale home">
       <LogoMark />
       <span className="text-base font-semibold tracking-tight">EliteWhale</span>
-      <span className="rounded-full border border-[color:var(--color-text)]/25 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider opacity-70">{realFunds ? 'private group' : 'testnet'}</span>
+      {/* Testnet builds keep their label; the private group shows the brand alone. */}
+      {realFunds ? null : (
+        <span className="rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider" style={{ border: '1px solid rgba(217,178,95,0.4)', color: GOLD }}>
+          testnet
+        </span>
+      )}
     </Link>
   );
 }
 
 /** Primary/secondary CTAs; signed-in visitors get a single "Open app" link. */
 function NavCtas({ signedIn, realFunds, onNavigate }: { signedIn: boolean; realFunds: boolean; onNavigate?: () => void }) {
-  const base = 'rounded-full px-5 py-2.5 text-sm font-medium text-center transition hover:brightness-105';
+  const base = 'rounded-full px-5 py-2.5 text-sm font-semibold text-center transition hover:brightness-110';
+  const gold = { background: GOLD_FILL, color: '#1b1407', boxShadow: '0 6px 24px -8px rgba(217,178,95,0.6)' };
   if (signedIn) {
     return (
-      <Link href="/dashboard" onClick={onNavigate} className={`${base} text-white`} style={{ background: 'var(--color-accent)' }}>
+      <Link href="/dashboard" onClick={onNavigate} className={base} style={gold}>
         Open app
       </Link>
     );
   }
   return (
     <>
-      <Link href="/register" onClick={onNavigate} className={`${base} text-white`} style={{ background: 'var(--color-accent)' }}>
+      <Link href="/register" onClick={onNavigate} className={base} style={gold}>
         {realFunds ? 'Request to Join' : 'Create Testnet Account'}
       </Link>
-      <Link href="/login" onClick={onNavigate} className={base} style={{ background: 'var(--color-login-bg)' }}>
+      <Link href="/login" onClick={onNavigate} className={`${base} hover:bg-white/5`} style={{ border: '1px solid rgba(246,239,223,0.25)', color: IVORY }}>
         Sign In
       </Link>
     </>
@@ -73,7 +87,7 @@ function MobileSheet({ open, onClose, signedIn, realFunds }: { open: boolean; on
           <motion.div
             key="backdrop"
             className="fixed inset-0 z-40"
-            style={{ background: 'rgba(25,40,55,0.35)', backdropFilter: 'blur(4px)' }}
+            style={{ background: 'rgba(3,5,10,0.6)', backdropFilter: 'blur(4px)' }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -85,7 +99,7 @@ function MobileSheet({ open, onClose, signedIn, realFunds }: { open: boolean; on
             aria-modal="true"
             aria-label="Menu"
             className="fixed right-0 top-0 z-50 flex flex-col px-6 py-5"
-            style={{ width: 'min(88vw, 360px)', height: '100dvh', background: '#CFC8C5', boxShadow: '-12px 0 48px rgba(25,40,55,0.18)' }}
+            style={{ width: 'min(88vw, 360px)', height: '100dvh', background: '#0b1120', color: IVORY, borderLeft: '1px solid rgba(217,178,95,0.25)', boxShadow: '-12px 0 48px rgba(0,0,0,0.5)' }}
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
@@ -95,15 +109,15 @@ function MobileSheet({ open, onClose, signedIn, realFunds }: { open: boolean; on
               <Link href="/" onClick={onClose} aria-label="EliteWhale home">
                 <LogoMark />
               </Link>
-              <button type="button" onClick={onClose} aria-label="Close menu" className="rounded-full p-2 transition hover:bg-black/5">
+              <button type="button" onClick={onClose} aria-label="Close menu" className="rounded-full p-2 transition hover:bg-white/10">
                 <X size={22} />
               </button>
             </div>
-            <div className="my-5 h-px w-full" style={{ background: 'rgba(25,40,55,0.15)' }} />
+            <div className="my-5 h-px w-full" style={{ background: 'linear-gradient(90deg, rgba(217,178,95,0.5), rgba(217,178,95,0))' }} />
             <nav className="flex flex-col gap-1">
               {NAV_LINKS.map((l, i) => (
                 <motion.div key={l.label} initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.18 + i * 0.07, duration: 0.4, ease: EASE }}>
-                  <Link href={l.href} onClick={onClose} className="block py-3 text-lg font-medium transition hover:opacity-70">
+                  <Link href={l.href} onClick={onClose} className="block py-3 text-lg font-medium transition hover:text-[#d9b25f]">
                     {l.label}
                   </Link>
                 </motion.div>
@@ -119,24 +133,30 @@ function MobileSheet({ open, onClose, signedIn, realFunds }: { open: boolean; on
   );
 }
 
-const iconStyle = { display: 'inline-block', verticalAlign: 'middle', position: 'relative', top: -2 } as const;
-
 /** `realFunds` switches the testnet wording to the private group's (real BSC USDT). */
 export function Hero({ signedIn, realFunds }: { signedIn: boolean; realFunds: boolean }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
     <MotionConfig reducedMotion="user">
-      <section className="relative min-h-screen w-full overflow-hidden" style={{ fontFamily: 'var(--font-body)', color: 'var(--color-text)' }}>
-        {/* Gradient shows while the video loads, and stays if it fails. */}
-        <div className="absolute inset-0" style={{ background: 'linear-gradient(160deg, #f2f2ee 0%, #e4dcf7 55%, #cfc8c5 100%)' }} aria-hidden />
-        <video className="absolute inset-0 h-full w-full object-cover" src={VIDEO_SRC} autoPlay muted loop playsInline preload="metadata" aria-hidden />
+      <section className="relative w-full overflow-hidden lg:min-h-screen" style={{ fontFamily: 'var(--font-body)', color: IVORY, background: HERO_BG }}>
+        {/* Fine gold grid, faded towards the edges. */}
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.07]"
+          style={{
+            backgroundImage: 'linear-gradient(rgba(217,178,95,1) 1px, transparent 1px), linear-gradient(90deg, rgba(217,178,95,1) 1px, transparent 1px)',
+            backgroundSize: '64px 64px',
+            maskImage: 'radial-gradient(ellipse 70% 60% at 50% 40%, #000 30%, transparent 75%)',
+            WebkitMaskImage: 'radial-gradient(ellipse 70% 60% at 50% 40%, #000 30%, transparent 75%)',
+          }}
+          aria-hidden
+        />
 
         <header className="relative z-10 mx-auto flex max-w-[1280px] items-center justify-between px-5 py-4 sm:px-8 sm:py-5">
           <Logo realFunds={realFunds} />
           <nav className="hidden items-center gap-8 md:flex">
             {NAV_LINKS.map((l) => (
-              <Link key={l.label} href={l.href} className="text-sm font-medium transition-opacity hover:opacity-60">
+              <Link key={l.label} href={l.href} className="text-sm font-medium opacity-80 transition hover:text-[#d9b25f] hover:opacity-100">
                 {l.label}
               </Link>
             ))}
@@ -149,17 +169,54 @@ export function Hero({ signedIn, realFunds }: { signedIn: boolean; realFunds: bo
           </button>
         </header>
 
-        <div className="relative z-10 mx-auto max-w-[1280px] px-5 sm:px-8" style={{ paddingTop: 'clamp(40px, 8vw, 72px)' }}>
-          <div style={{ maxWidth: 560 }}>
+        <div
+          className="relative z-10 mx-auto grid max-w-[1280px] items-center gap-6 px-5 pb-20 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-12 lg:pb-28"
+          style={{ paddingTop: 'clamp(16px, 5vw, 56px)' }}
+        >
+          {/* Logo on a lit stage: glow, two thin gold rings and a gentle float. */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.92 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 1, ease: EASE }}
+            className="relative order-first flex aspect-square w-full items-center justify-center justify-self-center lg:order-last"
+            style={{ maxWidth: 560 }}
+          >
+            <div className="absolute inset-[12%] rounded-full blur-3xl" style={{ background: 'radial-gradient(circle, rgba(232,196,111,0.45) 0%, rgba(232,196,111,0) 70%)' }} aria-hidden />
+            <div className="absolute inset-[4%] rounded-full" style={{ border: '1px solid rgba(217,178,95,0.28)' }} aria-hidden />
+            <div className="absolute inset-[14%] rounded-full" style={{ border: '1px solid rgba(217,178,95,0.14)' }} aria-hidden />
+            <motion.div
+              className="absolute left-1/2 top-[4%] h-2 w-2 -translate-x-1/2 rounded-full"
+              style={{ background: GOLD, boxShadow: '0 0 12px 3px rgba(232,196,111,0.8)' }}
+              animate={{ opacity: [0.4, 1, 0.4] }}
+              transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+              aria-hidden
+            />
+            <motion.div className="relative w-[88%]" animate={{ y: [0, -12, 0] }} transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}>
+              <Image
+                src="/logo.png"
+                alt="EliteWhale logo"
+                width={1536}
+                height={1024}
+                priority
+                className="h-auto w-full object-contain"
+                style={{ filter: 'drop-shadow(0 24px 48px rgba(0,0,0,0.55)) drop-shadow(0 0 40px rgba(232,196,111,0.25))' }}
+              />
+            </motion.div>
+            {/* Reflection pool under the whale. */}
+            <div className="absolute bottom-[10%] left-1/2 h-6 w-2/3 -translate-x-1/2 rounded-[50%] blur-xl" style={{ background: 'rgba(232,196,111,0.22)' }} aria-hidden />
+          </motion.div>
+
+          <div style={{ maxWidth: 600 }}>
             <motion.p
               custom={0}
               variants={fadeUp}
               initial="hidden"
               animate="visible"
-              className="mb-5 inline-flex rounded-full px-3 py-1 text-xs font-medium"
-              style={{ background: 'rgba(115,66,226,0.12)', color: 'var(--color-accent)' }}
+              className="mb-6 inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-medium tracking-wide"
+              style={{ border: '1px solid rgba(217,178,95,0.35)', background: 'rgba(217,178,95,0.08)', color: GOLD }}
             >
-              {realFunds ? 'Private group · USDT on BNB Smart Chain' : 'Testnet MVP · simulated trading venue'}
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: GOLD, boxShadow: '0 0 8px rgba(232,196,111,0.9)' }} aria-hidden />
+              {realFunds ? 'USDT on BNB Smart Chain' : 'Testnet MVP · simulated trading venue'}
             </motion.p>
 
             <motion.h1
@@ -167,49 +224,54 @@ export function Hero({ signedIn, realFunds }: { signedIn: boolean; realFunds: bo
               variants={fadeUp}
               initial="hidden"
               animate="visible"
-              style={{ fontFamily: 'var(--font-heading)', fontSize: 'clamp(1.65rem, 5vw, 3rem)', lineHeight: 1.05, letterSpacing: '-0.01em', marginBottom: 24 }}
+              style={{ fontFamily: 'var(--font-heading)', lineHeight: 0.98, letterSpacing: '-0.02em' }}
             >
-              <Waves size={24} style={iconStyle} aria-hidden /> Follow Every USDT <LockKeyhole size={24} style={iconStyle} aria-hidden /> Through an Auditable
-              Investment Ledger <Fingerprint size={24} style={iconStyle} aria-hidden />
+              <span className="block" style={{ fontSize: 'clamp(2rem, 5.2vw, 3.6rem)', color: IVORY }}>
+                Welcome to
+              </span>
+              <span
+                className="block pb-2"
+                style={{ fontSize: 'clamp(3rem, 9vw, 6.2rem)', backgroundImage: GOLD_TEXT, WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent', filter: 'drop-shadow(0 4px 24px rgba(217,178,95,0.25))' }}
+              >
+                EliteWhale
+              </span>
             </motion.h1>
 
-            <motion.p
-              custom={1}
-              variants={fadeUp}
-              initial="hidden"
-              animate="visible"
-              style={{ fontSize: 'clamp(0.9rem, 2.5vw, 1.1rem)', lineHeight: 1.65, opacity: 0.8, maxWidth: 560 }}
-            >
-              Clear books, full visibility. Every balance comes from an immutable double-entry ledger, performance is valued from real trade executions, and withdrawals follow
-              published rules.
-            </motion.p>
-
-            <motion.div custom={2} variants={fadeUp} initial="hidden" animate="visible" className="mt-8">
-              <motion.div className="inline-block" whileHover={{ scale: 1.04, filter: 'brightness(1.1)' }} whileTap={{ scale: 0.96 }}>
-                <Link
-                  href={signedIn ? '/dashboard' : '/register'}
-                  className="flex items-center justify-between font-semibold text-white"
-                  style={{
-                    background: 'var(--color-accent)',
-                    borderRadius: 50,
-                    padding: '17px 24px',
-                    fontSize: 'clamp(0.9rem, 2vw, 1rem)',
-                    boxShadow: '0 4px 24px rgba(115,66,226,0.28)',
-                    minWidth: 210,
-                    gap: 32,
-                  }}
-                >
-                  {signedIn ? 'Open Your Dashboard' : realFunds ? 'Request to Join' : 'Try It on Testnet'}
-                  <ArrowRightCircle size={20} aria-hidden />
-                </Link>
-              </motion.div>
+            <motion.div custom={1} variants={fadeUp} initial="hidden" animate="visible" className="mb-7 mt-3 flex items-center gap-4">
+              <span className="h-px w-8 shrink-0 sm:w-12" style={{ background: `linear-gradient(90deg, rgba(217,178,95,0), ${GOLD})` }} aria-hidden />
+              <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.22em] sm:text-[11px] sm:tracking-[0.34em]" style={{ color: GOLD }}>
+                The next generation era
+              </span>
+              <span className="h-px w-8 shrink-0 sm:w-12" style={{ background: `linear-gradient(90deg, ${GOLD}, rgba(217,178,95,0))` }} aria-hidden />
             </motion.div>
 
-            <motion.p custom={3} variants={fadeUp} initial="hidden" animate="visible" className="mt-6 text-xs" style={{ opacity: 0.7, maxWidth: 480 }}>
+            <motion.p custom={1} variants={fadeUp} initial="hidden" animate="visible" style={{ fontSize: 'clamp(0.98rem, 2.4vw, 1.12rem)', lineHeight: 1.7, opacity: 0.78, maxWidth: 540 }}>
+              A Web3 ecosystem built for real utility, transparent trading and sustainable digital-asset participation, growing together with its community.
+            </motion.p>
+
+            <motion.div custom={2} variants={fadeUp} initial="hidden" animate="visible" className="mt-9 flex flex-wrap items-center gap-3">
+              <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
+                <Link
+                  href={signedIn ? '/dashboard' : '/register'}
+                  className="flex items-center gap-6 rounded-full px-7 py-4 text-[15px] font-semibold transition hover:brightness-110"
+                  style={{ background: GOLD_FILL, color: '#1b1407', boxShadow: '0 10px 36px -10px rgba(217,178,95,0.75), inset 0 1px 0 rgba(255,255,255,0.45)' }}
+                >
+                  {signedIn ? 'Open Your Dashboard' : realFunds ? 'Request to Join' : 'Try It on Testnet'}
+                  <ArrowRight size={18} aria-hidden />
+                </Link>
+              </motion.div>
+              <Link href="#about" className="rounded-full px-6 py-4 text-[15px] font-medium transition hover:bg-white/5" style={{ border: '1px solid rgba(246,239,223,0.22)' }}>
+                Discover EliteWhale
+              </Link>
+            </motion.div>
+
+            <motion.p custom={3} variants={fadeUp} initial="hidden" animate="visible" className="mt-7 text-xs" style={{ opacity: 0.5, maxWidth: 480 }}>
               Returns are never guaranteed. Investment values can fall as well as rise, and you can lose some or all of the amount invested.
             </motion.p>
           </div>
         </div>
+
+        <div className="absolute inset-x-0 bottom-0 h-px" style={{ background: 'linear-gradient(90deg, rgba(217,178,95,0), rgba(217,178,95,0.6), rgba(217,178,95,0))' }} aria-hidden />
 
         <MobileSheet open={menuOpen} onClose={() => setMenuOpen(false)} signedIn={signedIn} realFunds={realFunds} />
       </section>

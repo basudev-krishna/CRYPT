@@ -51,7 +51,7 @@ export function SponsorForm({ userId, current }: { userId: string; current: stri
   );
 }
 
-/** Place or move this member (and their team) left or right under a parent. */
+/** Place or move this member (and their team) left or right under any parent; a taken spot's member moves down under them. */
 export function PlacementForm({ userId, parent, side: currentSide }: { userId: string; parent: string | null; side: 'left' | 'right' | null }) {
   const [code, setCode] = useState(parent ?? '');
   const [side, setSide] = useState<'left' | 'right'>(currentSide ?? 'left');
@@ -63,7 +63,7 @@ export function PlacementForm({ userId, parent, side: currentSide }: { userId: s
         <Field label="Under member" htmlFor="pl-code">
           <Input id="pl-code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="EW-000123" maxLength={12} />
         </Field>
-        <Field label="Side" htmlFor="pl-side">
+        <Field label="Side" htmlFor="pl-side" hint="Any spot: if taken, the member there moves down under this one.">
           <Select id="pl-side" value={side} onChange={(e) => setSide(e.target.value as 'left' | 'right')}>
             <option value="left">Left</option>
             <option value="right">Right</option>

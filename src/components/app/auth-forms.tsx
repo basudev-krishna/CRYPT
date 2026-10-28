@@ -1,6 +1,6 @@
 'use client';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { apiGet, apiPost } from '@/lib/api-client';
 import { COUNTRIES } from '@/lib/countries';
@@ -81,6 +81,9 @@ interface Availability {
   direct: Record<Side, boolean>;
 }
 
+/** For useSyncExternalStore: nothing to subscribe to, only server vs client. */
+const noopSubscribe = () => () => {};
+
 const REFERRAL_RE = /^EW-[0-9]{6,}$/;
 
 /** Live availability of each team side under a referral id (null while unknown or invalid); bump `recheck` to ask again. */
@@ -102,18 +105,32 @@ function usePlacement(referralCode: string, recheck: number) {
   return REFERRAL_RE.test(code) && state?.code === code ? state : null;
 }
 
-/** Two equal cards; the applicant must pick one. A side that is taken is shown, never silently swapped. */
-function TeamPositionPicker({ availability, value, onChange, error }: { availability: Availability; value: Side | null; onChange: (s: Side) => void; error?: string }) {
+/** Left/right toggle under the referral id's team. A side that is taken is shown, never silently swapped. */
+function TeamPositionToggle({
+  availability,
+  hasReferral,
+  value,
+  onChange,
+  error,
+}: {
+  availability: Availability | null;
+  hasReferral: boolean;
+  value: Side | null;
+  onChange: (s: Side) => void;
+  error?: string;
+}) {
+  const status = (side: Side) => {
+    if (!availability) return null;
+    if (availability.direct[side]) return { text: 'Available', tone: 'text-gain' };
+    return availability.mode === 'direct' ? { text: 'Taken', tone: 'text-loss' } : { text: 'Further down', tone: 'text-fg-muted' };
+  };
   return (
     <fieldset>
       <legend className="text-sm font-medium text-fg">Choose Your Team Position</legend>
-      <p className="mt-0.5 text-xs text-fg-muted">
-        You will be placed in {availability.sponsorCode}&apos;s team. Your choice is final; only an administrator can correct it later.
-      </p>
-      <div className="mt-3 grid grid-cols-2 gap-3" role="radiogroup" aria-label="Team position">
+      <div className="mt-2 grid grid-cols-2 gap-1 rounded-xl bg-surface-3 p-1 ring-1 ring-black/5" role="radiogroup" aria-label="Team position">
         {(['left', 'right'] as const).map((side) => {
-          const open = availability.direct[side];
-          const blocked = !open && availability.mode === 'direct';
+          const st = status(side);
+          const blocked = st?.text === 'Taken';
           const selected = value === side;
           return (
             <button
@@ -121,28 +138,27 @@ function TeamPositionPicker({ availability, value, onChange, error }: { availabi
               type="button"
               role="radio"
               aria-checked={selected}
+              aria-label={`${side} team`}
               disabled={blocked}
               onClick={() => onChange(side)}
-              className={`rounded-xl border p-4 text-left transition ${
-                selected ? 'border-accent bg-accent/5 ring-2 ring-accent/30' : 'border-line bg-white hover:border-accent/50'
+              className={`flex flex-col items-center rounded-lg px-3 py-2.5 text-sm font-semibold capitalize transition ${
+                selected ? 'bg-accent text-white shadow-sm' : 'text-fg-muted hover:bg-white hover:text-fg'
               } disabled:cursor-not-allowed disabled:opacity-50`}
             >
-              <svg viewBox="0 0 60 36" className="mb-2 h-9 w-16" aria-hidden>
-                <circle cx="30" cy="7" r="5" className="fill-fg-subtle" />
-                <line x1="30" y1="12" x2="12" y2="26" className="stroke-line-strong" strokeWidth="2" />
-                <line x1="30" y1="12" x2="48" y2="26" className="stroke-line-strong" strokeWidth="2" />
-                <circle cx="12" cy="29" r="5" className={side === 'left' ? 'fill-accent' : 'fill-line-strong'} />
-                <circle cx="48" cy="29" r="5" className={side === 'right' ? 'fill-accent' : 'fill-line-strong'} />
-              </svg>
-              <span className="block text-sm font-semibold uppercase tracking-wide">{side} team</span>
-              <span className={`mt-1 block text-xs ${open ? 'text-gain' : blocked ? 'text-loss' : 'text-fg-muted'}`}>
-                {open ? 'Available directly below' : blocked ? 'Taken' : 'Placed further down this side'}
-              </span>
+              {side}
+              {st ? <span className={`text-[11px] font-medium normal-case ${selected ? 'text-white/80' : st.tone}`}>{st.text}</span> : null}
             </button>
           );
         })}
       </div>
-      {error ? <p className="mt-2 text-xs text-loss" role="alert">{error}</p> : null}
+      <p className="mt-1.5 text-xs text-fg-muted">
+        {availability
+          ? `You will join ${availability.sponsorCode}'s ${value ?? 'chosen'} team. Your choice is final; only an administrator can correct it later.`
+          : hasReferral
+            ? 'Checking the referral id…'
+            : "Enter your referral id above to see your referrer's team."}
+      </p>
+      {error ? <p className="mt-1 text-xs text-loss" role="alert">{error}</p> : null}
     </fieldset>
   );
 }
@@ -158,10 +174,18 @@ export function RegisterForm({ email = '', referralCode = '' }: { email?: string
   const [placed, setPlaced] = useState<{ side: Side; parentCode: string } | null>(null);
   const [recheck, setRecheck] = useState(0);
   const placement = usePlacement(refCode, recheck);
+  // Country names come from the runtime's ICU data, which differs between Node and browsers
+  // ("Hong Kong" vs "Hong Kong SAR China"), so the list is built after hydration only.
+  const hydrated = useSyncExternalStore(
+    noopSubscribe,
+    () => true,
+    () => false,
+  );
   const countries = useMemo(() => {
-    const names = new Intl.DisplayNames(undefined, { type: 'region' });
-    return COUNTRIES.map(([code, dial]) => ({ code, dial, name: names.of(code) ?? code })).sort((a, b) => a.name.localeCompare(b.name));
-  }, []);
+    if (!hydrated) return [];
+    const names = new Intl.DisplayNames(['en'], { type: 'region' });
+    return COUNTRIES.map(([code, dial]) => ({ code, dial, name: names.of(code) ?? code })).sort((a, b) => a.name.localeCompare(b.name, 'en'));
+  }, [hydrated]);
   const dial = countries.find((c) => c.code === country)?.dial;
 
   const onSubmit = (e: FormEvent<HTMLFormElement>) => {
@@ -170,7 +194,13 @@ export function RegisterForm({ email = '', referralCode = '' }: { email?: string
     const password = String(f.get('password'));
     setFieldErrors({});
     if (password !== String(f.get('confirm'))) return setFieldErrors({ confirm: 'Passwords do not match.' });
-    if (placement?.availability && !side) return setFieldErrors({ teamSide: 'Choose the left or right team.' });
+    if (!refCode.trim()) return setFieldErrors({ referralCode: 'Enter the referral id of the person who referred you.' });
+    if (!side) return setFieldErrors({ teamSide: 'Choose the left or right team.' });
+    // A side picked before the referral id showed it as taken must be chosen again.
+    if (side && placement?.availability?.mode === 'direct' && !placement.availability.direct[side]) {
+      setSide(null);
+      return setFieldErrors({ teamSide: `The ${side} team is taken under this referral id. Choose the other side.` });
+    }
     const rawPhone = String(f.get('phone')).trim();
     const phone = rawPhone.startsWith('+') || !dial ? rawPhone : `+${dial}${rawPhone.replace(/^0+/, '')}`;
     void run(async () => {
@@ -182,7 +212,7 @@ export function RegisterForm({ email = '', referralCode = '' }: { email?: string
         countryCode: country,
         password,
         referralCode: refCode,
-        teamSide: refCode.trim() ? side : null,
+        teamSide: side,
       });
       if (!r.ok) {
         if (r.code === 'validation_error') {
@@ -258,25 +288,20 @@ export function RegisterForm({ email = '', referralCode = '' }: { email?: string
           <PasswordInput id="confirm" name="confirm" autoComplete="new-password" />
         </Field>
       </div>
-      <Field label="Referral id (optional)" htmlFor="referralCode" error={fe.referralCode} hint={fe.referralCode ? undefined : 'Member id of the person who referred you, e.g. EW-000123'}>
+      <Field label="Referral id" htmlFor="referralCode" error={fe.referralCode} hint={fe.referralCode ? undefined : 'Member id of the person who referred you, e.g. EW-000123'}>
         <Input
           id="referralCode"
           name="referralCode"
           value={refCode}
-          onChange={(e) => {
-            setRefCode(e.target.value);
-            setSide(null);
-          }}
+          onChange={(e) => setRefCode(e.target.value)}
           autoCapitalize="characters"
           spellCheck={false}
           maxLength={12}
+          required
         />
       </Field>
-      {placement?.availability ? (
-        <TeamPositionPicker availability={placement.availability} value={side} onChange={setSide} error={fe.teamSide} />
-      ) : placement?.error ? (
-        <Notice tone="danger">{placement.error}</Notice>
-      ) : null}
+      <TeamPositionToggle availability={placement?.availability ?? null} hasReferral={REFERRAL_RE.test(refCode.trim().toUpperCase())} value={side} onChange={setSide} error={fe.teamSide} />
+      {placement?.error ? <Notice tone="danger">{placement.error}</Notice> : null}
       {error ? <Notice tone="danger">{error}</Notice> : null}
       <Button type="submit" disabled={busy} className="w-full">{busy ? 'Creating account…' : 'Create account'}</Button>
     </form>

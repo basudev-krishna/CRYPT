@@ -60,7 +60,7 @@ export default async function DashboardPage() {
               <Sparkles size={14} className="text-accent" aria-hidden /> {greeting()}
               {name ? `, ${name}` : ''}
             </p>
-            <h1 className="mt-1 font-heading text-[clamp(1.7rem,3.2vw,2.4rem)] leading-tight">Your account at a glance</h1>
+            <h1 className="mt-1 font-heading text-[clamp(1.7rem,3.2vw,2.4rem)] leading-tight">Your account</h1>
           </div>
           <div className="flex gap-2">
             <ButtonLink href="/deposit">

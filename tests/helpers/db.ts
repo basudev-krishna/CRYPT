@@ -61,7 +61,7 @@ const APP_TABLES = [
   'trade_executions', 'trade_import_batches', 'sim_venue_executions', 'treasury_transfers',
   'withdrawal_transactions', 'withdrawal_destinations', 'withdrawal_requests',
   'treasury_snapshots', 'reconciliation_runs', 'risk_events', 'audit_events', 'notification_events',
-  'rate_limits', 'internal_request_nonces', 'kyc_records', 'staff_roles', 'member_invitations', 'referral_rewards', 'offchain_entries', 'offchain_holders', 'manual_adjustments', 'sponsor_changes', 'placement_history', 'binary_placements', 'program_rewards', 'matching_sources', 'rank_achievements',
+  'rate_limits', 'internal_request_nonces', 'kyc_records', 'staff_roles', 'member_invitations', 'referral_rewards', 'offchain_entries', 'offchain_holders', 'manual_adjustments', 'sponsor_changes', 'placement_history', 'binary_placements', 'program_rewards', 'matching_sources', 'rank_achievements', 'rank_corrections',
 ];
 
 export async function resetAppData(): Promise<void> {

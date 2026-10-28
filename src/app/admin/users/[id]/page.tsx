@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { webDb } from '@/server/db';
 import { adminUserDetail } from '@/server/queries/admin';
-import { listActivity, listDeposits, listWithdrawals } from '@/server/queries/user';
+import { getRewardIncome, listActivity, listDeposits, listWithdrawals } from '@/server/queries/user';
 import { Badge, Card, CardHeader, PageHeader, Table, Td } from '@/components/ui/primitives';
 import { Money } from '@/components/ui/money';
 import { DepositStatus, EVENT_LABELS, WithdrawalStatus } from '@/components/ui/status';
@@ -17,6 +17,7 @@ import { listAdjustments, operatorFloats } from '@/server/adjustments/manual';
 import { AdjustmentForm } from '@/components/admin/adjustment-form';
 import { getMembership } from '@/server/queries/user';
 import { networkHistory, placementOf, teamTree } from '@/server/referrals/network';
+import { effectiveProgram, rankCorrections, rankHistory } from '@/server/referrals/program';
 import { PlacementForm, SponsorForm } from '@/components/admin/network-forms';
 import { TeamTree } from '@/components/app/team-tree';
 
@@ -29,7 +30,7 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
   const detail = await adminUserDetail(db, id);
   if (!detail) notFound();
   const staff = await pageStaff();
-  const [activity, deposits, withdrawals, adjustments, floats, bonusFunds, membership, placement, tree, history] = await Promise.all([
+  const [activity, deposits, withdrawals, adjustments, floats, bonusFunds, membership, placement, tree, history, { params: program }, ranksHeld, corrections] = await Promise.all([
     listActivity(db, id, 30),
     listDeposits(db, id, 20),
     listWithdrawals(db, id, 20),
@@ -40,7 +41,13 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
     placementOf(db, id),
     teamTree(db, id, 3),
     networkHistory(db, id),
+    effectiveProgram(db),
+    rankHistory(db, id),
+    rankCorrections(db, id),
   ]);
+  const heldRanks = new Map(ranksHeld.map((r) => [r.rank_code, r]));
+  const balanceRows = detail.balances as { token_id: number }[];
+  const incomes = new Map(await Promise.all(balanceRows.map(async (b) => [Number(b.token_id), await getRewardIncome(db, id, Number(b.token_id))] as const)));
   const roles = (await db.query<{ role: StaffRole }>('select role::text as role from public.staff_roles where user_id = $1 order by role', [id])).rows.map((r) => r.role);
   const canManageStaff = can(staff.roles, 'staff.manage');
   const canAdjust = can(staff.roles, 'balance.adjust');
@@ -88,9 +95,15 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
         </Card>
         <Card>
           <CardHeader title="Balances (ledger)" />
-          <Table head={['Token', 'Available', 'Reserved', 'Pending inv.']}>
+          <Table head={['Token', 'Available', 'Reserved', 'Pending inv.', 'Total income']}>
             {(detail.balances as { token_id: number; cash_base: string; reserved_base: string; pending_subscription_base: string }[]).map((b) => (
-              <tr key={b.token_id}><Td>#{b.token_id}</Td><Td><Money value={b.cash_base} decimals={6} /></Td><Td><Money value={b.reserved_base} decimals={6} /></Td><Td><Money value={b.pending_subscription_base} decimals={6} /></Td></tr>
+              <tr key={b.token_id}>
+                <Td>#{b.token_id}</Td>
+                <Td><Money value={b.cash_base} decimals={6} /></Td>
+                <Td><Money value={b.reserved_base} decimals={6} /></Td>
+                <Td><Money value={b.pending_subscription_base} decimals={6} /></Td>
+                <Td><Money value={incomes.get(Number(b.token_id)) ?? 0n} decimals={6} /></Td>
+              </tr>
             ))}
           </Table>
           <p className="mt-3 text-xs text-fg-subtle">Balances are never edited in place. Use an adjustment below; every change is a ledger entry with its reason.</p>
@@ -103,8 +116,8 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
       <div className="mt-6 grid gap-6 xl:grid-cols-2">
         <Card>
           <CardHeader
-            title="Adjust balance"
-            subtitle="For money settled with you personally. Credits come from your operator float and debits go back to it, so the group wallet always covers every balance."
+            title="Adjust balance or income"
+            subtitle="Balance: money settled with you personally, against your operator float. Income: award a bonus from the referral fund, or take back income paid by mistake into it. Every change is a ledger entry; fix a mistake with Reverse."
           />
           {canAdjust ? <AdjustmentForm userId={id} floats={fundOptions} /> : <p className="text-sm text-fg-muted">Only administrators can adjust balances.</p>}
         </Card>
@@ -116,7 +129,7 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
                 <Td className="text-fg-muted">{dateTime(a.created_at)}</Td>
                 <Td><Money value={a.direction === 'credit' ? a.amount_base : `-${a.amount_base}`} decimals={Number(a.decimals)} symbol={a.symbol} signed colored /></Td>
                 <Td className="max-w-xs">
-                  {a.fund === 'referral_reward_fund' ? <span className="block text-xs text-fg-muted">Referral bonus</span> : null}
+                  {a.fund === 'referral_reward_fund' ? <span className="block text-xs text-fg-muted">{a.direction === 'credit' ? 'Income (referral fund)' : a.reverses_adjustment_id ? 'Income reversal' : 'Income correction'}</span> : null}
                   {a.reason}
                   {a.error ? <span className="block text-xs text-loss">{a.error}</span> : null}
                 </Td>
@@ -169,6 +182,54 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
           ) : null}
         </Card>
       </div>
+      <Card className="mt-6">
+        <CardHeader
+          title="Ranks"
+          subtitle="Ranks held now, after corrections. Revoke a wrong rank or grant a missing one; the latest correction per rank wins, so a mistake is undone with the opposite one. Granting creates no reward: award income separately if one is owed."
+        />
+        <div className="flex flex-wrap gap-2">
+          {program.ranks.levels.map((r) => {
+            const h = heldRanks.get(r.code);
+            return (
+              <Badge key={r.code} tone={h ? 'success' : 'neutral'} title={h ? `${h.source} ${dateTime(h.achieved_at)}` : 'Not held'}>
+                {r.code}
+                {h?.source === 'granted' ? ' · granted' : ''}
+              </Badge>
+            );
+          })}
+        </div>
+        {canNetwork ? (
+          <div className="mt-4 max-w-md">
+            <NoteAction
+              url={`/api/admin/users/${id}/rank`}
+              noteField="reason"
+              noteLabel="Why correct this rank?"
+              submitLabel="Save correction"
+              options={program.ranks.levels.map((r) =>
+                heldRanks.has(r.code) ? { value: `revoke:${r.code}`, label: `Revoke ${r.code}`, field: 'change' } : { value: `grant:${r.code}`, label: `Grant ${r.code}`, field: 'change' },
+              )}
+            />
+          </div>
+        ) : null}
+        {corrections.length ? (
+          <div className="mt-4">
+            <Table head={['When', 'Correction', 'By', 'Reason']}>
+              {corrections.map((c) => (
+                <tr key={c.id}>
+                  <Td className="text-fg-muted">{dateTime(c.created_at)}</Td>
+                  <Td>
+                    <Badge tone={c.action === 'grant' ? 'success' : 'warn'}>
+                      {c.action} {c.rank_code}
+                    </Badge>
+                  </Td>
+                  <Td className="text-fg-muted">{c.created_by_email ?? '—'}</Td>
+                  <Td className="text-fg-muted">{c.reason}</Td>
+                </tr>
+              ))}
+            </Table>
+          </div>
+        ) : null}
+      </Card>
       <div className="mt-6 grid gap-6 xl:grid-cols-2">
         <Card>
           <CardHeader title="KYC history" />

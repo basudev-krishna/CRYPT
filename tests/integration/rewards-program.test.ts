@@ -15,8 +15,10 @@ import { creditDeposit, ingestNetwork, refreshDeposit } from '../../src/server/d
 import { createAllocation, postAllocation, type AllocationKind } from '../../src/server/deposits/allocations';
 import { createAdjustment, postAdjustment, reverseAdjustment } from '../../src/server/adjustments/manual';
 import {
+  correctRank,
   detectMatchingRewards,
   evaluateRanks,
+  memberProgramOverview,
   memberVolumes,
   placementAvailability,
   postProgramReward,
@@ -26,6 +28,7 @@ import {
 import { checkRegistration } from '../../src/server/signup';
 import { DEFAULT_PROGRAM, usdFixed } from '../../src/server/referrals/program-math';
 import type { RewardsProgram } from '../../src/server/ops';
+import { getRewardIncome } from '../../src/server/queries/user';
 
 const GROUP = '0x0000000000000000000000000000000000000a07';
 const service = { type: 'service' as const, id: 'test' };
@@ -131,6 +134,16 @@ describe('team position at sign-up', () => {
     expect(await placement(right)).toMatchObject({ parent_user_id: sponsor, side: 'right' });
   });
 
+  it("never fills up an administrator's referral id, even in direct mode", async () => {
+    await save({ placement_mode: 'direct' });
+    const ref = await code(adminId);
+    const first = await createUser({ referralCode: ref, side: 'left' });
+    expect(await placementAvailability(web, ref)).toMatchObject({ mode: 'outer', direct: { left: false, right: true } });
+    await expect(checkRegistration(web, { username: 'second_left', referralCode: ref, teamSide: 'left' })).resolves.toBeUndefined();
+    const second = await createUser({ referralCode: ref, side: 'left' });
+    expect(await placement(second)).toMatchObject({ parent_user_id: first, side: 'left' });
+  });
+
   it('never lets two concurrent sign-ups take the same position', async () => {
     const sponsor = await createUser();
     const ref = await code(sponsor);
@@ -159,6 +172,47 @@ describe('reward base', () => {
     const rev = await withTransaction(web, (db) => reverseAdjustment(db, { adjustmentId: adj, reason: 'Bonus was recorded twice', staffUserId: adminId, actor: staff() }));
     await withTransaction(worker, (db) => postAdjustment(db, rev.id, service));
     expect((await memberVolumes(web, [member])).get(member)!.self).toBe(0n);
+  });
+
+  it('reports total income as rewards paid from the pool, net of reversals, never deposits', async () => {
+    const member = await createUser();
+    await allocate(await receipt('500'), 'assignment', [{ userId: member, amount: '500' }]);
+    await fundPool('100');
+    expect(await getRewardIncome(web, member, tokenId)).toBe(0n);
+    const adj = await bonus(member, '40');
+    await bonus(member, '10');
+    expect(await getRewardIncome(web, member, tokenId)).toBe(usdt('50'));
+    const rev = await withTransaction(web, (db) => reverseAdjustment(db, { adjustmentId: adj, reason: 'Bonus was recorded twice', staffUserId: adminId, actor: staff() }));
+    await withTransaction(worker, (db) => postAdjustment(db, rev.id, service));
+    expect(await getRewardIncome(web, member, tokenId)).toBe(usdt('10'));
+  });
+
+  it('lets the administrator correct income paid by mistake, back into the pool and out of earnings', async () => {
+    const sponsor = await createUser();
+    const member = await createUser({ referralCode: await code(sponsor), side: 'left' });
+    await fundPool('100');
+    await bonus(member, '30');
+    const correct = (amount: string, reason: string) =>
+      withTransaction(web, (db) =>
+        createAdjustment(db, { userId: member, tokenId, direction: 'debit', amount, reason, fund: 'referral_reward_fund', staffUserId: adminId, actor: staff() }),
+      );
+    const fix = await correct('12', 'Bonus paid twice by a glitch');
+    expect(await withTransaction(worker, (db) => postAdjustment(db, fix.id, service))).toBe('posted');
+    expect(await withTransaction(worker, (db) => postAdjustment(db, fix.id, service))).toBe('unchanged');
+    expect(await balanceOf('user_cash', tokenId, member)).toBe(usdt('18'));
+    expect(await balanceOf('referral_reward_fund', tokenId)).toBe(usdt('82'));
+    expect(await balanceOf('operator_float', tokenId)).toBe(0n);
+    expect(await getRewardIncome(web, member, tokenId)).toBe(usdt('18'));
+    const v = await memberVolumes(web, [sponsor, member]);
+    expect(v.get(member)!.self).toBe(usdFixed('18'));
+    expect(v.get(sponsor)!.left).toBe(usdFixed('18'));
+    const ev = await one<{ event_type: string }>(admin, "select event_type from public.journal_entries where source_type = 'manual_adjustment' and source_id = $1", [fix.id]);
+    expect(ev.event_type).toBe('income_correction');
+
+    // More than the member holds fails instead of going negative.
+    const big = await correct('50', 'Correction larger than the balance');
+    expect(await withTransaction(worker, (db) => postAdjustment(db, big.id, service))).toBe('failed');
+    expect(await withTransaction(worker, (db) => checkIntegrity(db))).toEqual(clean);
   });
 });
 
@@ -201,6 +255,7 @@ describe('matching bonus', () => {
     expect(await post(l1!.id)).toBe('posted');
     expect(await post(l1!.id)).toBe('unchanged');
     expect(await balanceOf('user_cash', tokenId, b)).toBe(usdt('5'));
+    expect(await getRewardIncome(web, b, tokenId)).toBe(usdt('5'));
     expect(await balanceOf('referral_reward_fund', tokenId)).toBe(usdt('3'));
     // Matching rewards are not earnings themselves: no matching on matching.
     expect(await detect()).toBe(0);
@@ -288,5 +343,59 @@ describe('ranks', () => {
     await team();
     expect(await withTransaction(worker, (db) => evaluateRanks(db))).toEqual({ ranks: 1, rewards: 0 });
     expect(await rewards()).toEqual([]);
+  });
+
+  const correct = (userId: string, action: 'revoke' | 'grant', rankCode: string, reason = 'Rank recorded by a glitch') =>
+    withTransaction(web, (db) => correctRank(db, { userId, rankCode, action, reason, staffUserId: adminId, actor: staff() }));
+  const held = async (userId: string) => (await withTransaction(web, (db) => memberProgramOverview(db, userId))).history.map((h) => [h.rank_code, h.source]);
+
+  it('revokes a wrong rank, rejects its pending reward, and the worker never re-awards it', async () => {
+    await ladder(true);
+    const s = await team();
+    await withTransaction(worker, (db) => evaluateRanks(db));
+    expect(await held(s)).toEqual([['R1', 'achieved']]);
+
+    await correct(s, 'revoke', 'R1');
+    expect(await held(s)).toEqual([]);
+    expect((await withTransaction(web, (db) => memberProgramOverview(db, s))).highestRankOrder).toBe(0);
+    const [r] = await rewards();
+    expect(r).toMatchObject({ kind: 'rank', status: 'rejected' });
+    // Volumes still meet R1, but a corrected rank is settled.
+    expect(await withTransaction(worker, (db) => evaluateRanks(db))).toEqual({ ranks: 0, rewards: 0 });
+    expect(await held(s)).toEqual([]);
+    // The record of what was measured is kept.
+    expect((await admin.query('select 1 from public.rank_achievements where user_id = $1', [s])).rowCount).toBe(1);
+    await expect(admin.query('delete from public.rank_corrections')).rejects.toThrow();
+
+    // Undo the mistake with the opposite correction.
+    await correct(s, 'grant', 'R1', 'Revoked the wrong member');
+    expect(await held(s)).toEqual([['R1', 'achieved']]);
+    const risk = await one<{ n: number }>(admin, "select count(*)::int as n from public.risk_events where kind = 'rank_corrected' and severity = 'high'");
+    expect(risk.n).toBe(2);
+  });
+
+  it('grants a rank without a reward and refuses impossible corrections', async () => {
+    await ladder(true);
+    const m = await createUser();
+    await correct(m, 'grant', 'R2', 'Agreed with the group for past work');
+    expect(await held(m)).toEqual([['R2', 'granted']]);
+    expect(await withTransaction(worker, (db) => evaluateRanks(db))).toEqual({ ranks: 0, rewards: 0 });
+    expect(await rewards()).toEqual([]);
+    await expect(correct(m, 'grant', 'R2')).rejects.toMatchObject({ code: 'invalid_state' });
+    await expect(correct(m, 'revoke', 'R1')).rejects.toMatchObject({ code: 'invalid_state' });
+    await expect(correct(m, 'grant', 'NOPE')).rejects.toMatchObject({ code: 'invalid_rank' });
+    await expect(correct(m, 'revoke', 'R2', 'short')).rejects.toMatchObject({ code: 'reason_required' });
+  });
+
+  it('refuses to revoke while the rank reward is approved but not yet paid', async () => {
+    await ladder(true);
+    const s = await team();
+    await withTransaction(worker, (db) => evaluateRanks(db));
+    const [r] = await rewards();
+    await review(r!.id);
+    await expect(correct(s, 'revoke', 'R1')).rejects.toMatchObject({ code: 'reward_approved' });
+    expect(await post(r!.id)).toBe('posted');
+    await correct(s, 'revoke', 'R1');
+    expect(await held(s)).toEqual([]);
   });
 });

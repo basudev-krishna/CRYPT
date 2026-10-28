@@ -3,10 +3,10 @@ import Link from 'next/link';
 import { pageUser } from '@/server/http/auth';
 import { webDb } from '@/server/db';
 import { getMembership, listReferralRewards } from '@/server/queries/user';
-import { DEFAULT_TIERS, referralPolicy, referralTier } from '@/server/referrals/rewards';
+import { referralPolicy } from '@/server/referrals/rewards';
 import { teamTree } from '@/server/referrals/network';
 import { TeamTree } from '@/components/app/team-tree';
-import { Badge, Card, CardHeader, EmptyState, Mono, Notice, PageHeader, Table, Td } from '@/components/ui/primitives';
+import { Card, CardHeader, EmptyState, Mono, Notice, PageHeader, Table, Td } from '@/components/ui/primitives';
 import { Money } from '@/components/ui/money';
 import { ReferralRewardStatus, ReferralStageBadge } from '@/components/ui/referral-stage';
 import { Stat } from '@/components/app/stat';
@@ -21,9 +21,6 @@ export default async function ReferralsPage() {
   const [membership, rewards, policy, tree] = await Promise.all([getMembership(db, user.id), listReferralRewards(db, user.id), referralPolicy(db), teamTree(db, user.id, 4)]);
   if (!membership) return <PageHeader title="Referrals" />;
   const referred = membership.sponsored;
-  const qualified = referred.filter((r) => r.stage === 'qualified').length;
-  const tiers = policy?.params.tiers ?? DEFAULT_TIERS;
-  const tier = referralTier(qualified, tiers);
   const program = policy?.params.enabled ? policy.params : null;
   return (
     <>
@@ -31,20 +28,13 @@ export default async function ReferralsPage() {
         title="Referrals"
         description="Invite people you know. Anyone who signs up with your link or referral id is recorded as your referral, permanently."
       />
-      <div className="grid gap-6 md:grid-cols-4">
+      <div className="grid gap-6 md:grid-cols-2">
         <Stat
           label="Your referral id"
           value={<Mono className="text-xl">{membership.memberCode}</Mono>}
           sub={membership.sponsorMemberCode ? `You were referred by ${membership.sponsorMemberCode}` : undefined}
         />
-        <Stat
-          label="Your tier"
-          value={tier.current?.label ?? '—'}
-          emphasis={tier.current !== null}
-          sub={tier.next ? `${tier.remaining} more qualified for ${tier.next.label}` : 'Top tier reached'}
-        />
         <Stat label="People referred" value={referred.length} />
-        <Stat label="Qualified" value={qualified} sub="Approved and made a first deposit" />
       </div>
 
       <Card className="mt-6">
@@ -59,31 +49,19 @@ export default async function ReferralsPage() {
         </div>
       </Card>
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-2">
-        <Card>
-          <CardHeader title="Tiers" subtitle="Recognition by qualified referrals." />
-          <div className="flex flex-wrap gap-2">
-            {tiers.map((t) => (
-              <Badge key={t.label} tone={qualified >= t.min_qualified ? 'success' : 'neutral'} title={`${t.min_qualified} qualified referrals`}>
-                {t.label} · {t.min_qualified}
-              </Badge>
-            ))}
-          </div>
-        </Card>
-        <Card>
-          <CardHeader title={`Your rewards (${rewards.length})`} />
-          <Table head={['Referral', 'Amount', 'Status', 'Paid']} empty={rewards.length ? null : <EmptyState title="No rewards yet" />}>
-            {rewards.map((r) => (
-              <tr key={r.id}>
-                <Td><Mono>{r.referredMemberCode}</Mono></Td>
-                <Td><Money value={r.amountBase} decimals={r.decimals} symbol={r.symbol} /></Td>
-                <Td><ReferralRewardStatus status={r.status} /></Td>
-                <Td className="text-fg-muted">{r.postedAt ? dateTime(r.postedAt) : '—'}</Td>
-              </tr>
-            ))}
-          </Table>
-        </Card>
-      </div>
+      <Card className="mt-6">
+        <CardHeader title={`Your rewards (${rewards.length})`} />
+        <Table head={['Referral', 'Amount', 'Status', 'Paid']} empty={rewards.length ? null : <EmptyState title="No rewards yet" />}>
+          {rewards.map((r) => (
+            <tr key={r.id}>
+              <Td><Mono>{r.referredMemberCode}</Mono></Td>
+              <Td><Money value={r.amountBase} decimals={r.decimals} symbol={r.symbol} /></Td>
+              <Td><ReferralRewardStatus status={r.status} /></Td>
+              <Td className="text-fg-muted">{r.postedAt ? dateTime(r.postedAt) : '—'}</Td>
+            </tr>
+          ))}
+        </Table>
+      </Card>
 
       <Card className="mt-6">
         <CardHeader

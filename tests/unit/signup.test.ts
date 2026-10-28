@@ -9,6 +9,7 @@ const valid = {
   countryCode: 'IN',
   password: 'Strong-Password-2026',
   referralCode: ' ew-000123 ',
+  teamSide: 'right',
 };
 
 describe('registerSchema', () => {
@@ -21,20 +22,21 @@ describe('registerSchema', () => {
       countryCode: 'IN',
       password: 'Strong-Password-2026',
       referralCode: 'EW-000123',
-      teamSide: null,
+      teamSide: 'right',
     });
   });
 
   it('accepts only left or right as the team side', () => {
     expect(registerSchema.parse({ ...valid, teamSide: 'left' }).teamSide).toBe('left');
-    expect(registerSchema.parse({ ...valid, teamSide: null }).teamSide).toBeNull();
+    expect(registerSchema.safeParse({ ...valid, teamSide: null }).success).toBe(false);
+    expect(registerSchema.safeParse({ ...valid, teamSide: undefined }).success).toBe(false);
     expect(registerSchema.safeParse({ ...valid, teamSide: 'middle' }).success).toBe(false);
   });
 
-  it('treats a blank or missing referral id as none', () => {
-    expect(registerSchema.parse({ ...valid, referralCode: '  ' }).referralCode).toBeNull();
+  it('requires a referral id', () => {
+    expect(registerSchema.safeParse({ ...valid, referralCode: '  ' }).success).toBe(false);
     const withoutReferral = Object.fromEntries(Object.entries(valid).filter(([k]) => k !== 'referralCode'));
-    expect(registerSchema.parse(withoutReferral).referralCode).toBeNull();
+    expect(registerSchema.safeParse(withoutReferral).success).toBe(false);
   });
 
   it('rejects bad usernames, phones, weak passwords and unknown formats', () => {

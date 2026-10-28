@@ -1,15 +1,19 @@
 import type { Metadata } from 'next';
 import { Hero } from '@/components/landing/hero';
-import { AboutEliteWhale, FactStrip, FinalCta, Footer, GroupStatus, HowItWorks, NavExplainer, NetworksAndStatus, Pillars, Security, WithdrawalControls } from '@/components/landing/sections';
+import { AboutEliteWhale, Footer, NetworksAndStatus, RevenueModel, Roadmap, Support, UpcomingProjects, VideoShowcase } from '@/components/landing/sections';
 import { getSessionUser } from '@/server/http/auth';
 import { realFundsActive } from '@/server/phase-guard';
 
 export function generateMetadata(): Metadata {
   if (realFundsActive()) {
     return {
-      title: { absolute: 'EliteWhale · Private USDT investment group' },
-      description: 'A private USDT investment group on BNB Smart Chain, run on an auditable double-entry ledger.',
-      openGraph: { title: 'EliteWhale', description: 'A private USDT investment group run on an auditable ledger.', type: 'website' },
+      title: { absolute: 'EliteWhale · The Next Generation Era' },
+      description: 'A Web3 ecosystem built for real utility, transparent trading and sustainable digital-asset participation.',
+      openGraph: {
+        title: 'EliteWhale · The Next Generation Era',
+        description: 'A Web3 ecosystem built for real utility, transparent trading and sustainable digital-asset participation.',
+        type: 'website',
+      },
     };
   }
   return {
@@ -34,15 +38,13 @@ export default async function LandingPage() {
     <div className="landing" style={{ fontFamily: 'var(--font-body)', color: 'var(--color-text)', background: 'var(--color-login-bg)' }}>
       <Hero signedIn={signedIn} realFunds={realFunds} />
       <main>
-        <AboutEliteWhale realFunds={realFunds} />
-        <FactStrip />
-        <HowItWorks realFunds={realFunds} />
-        <Pillars />
-        <NavExplainer />
-        <WithdrawalControls />
-        <Security />
-        {realFunds ? <GroupStatus /> : <NetworksAndStatus />}
-        <FinalCta signedIn={signedIn} realFunds={realFunds} />
+        <VideoShowcase />
+        <AboutEliteWhale />
+        <Roadmap />
+        <UpcomingProjects />
+        <RevenueModel />
+        {realFunds ? null : <NetworksAndStatus />}
+        <Support />
       </main>
       <Footer realFunds={realFunds} />
     </div>

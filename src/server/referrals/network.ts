@@ -71,7 +71,34 @@ export async function correctSponsor(
   await raiseRiskEvent(db, { userId: args.userId, kind: 'admin_sponsor_correction', severity: 'medium', subjectType: 'user', subjectId: args.userId, details });
 }
 
-/** Place a member (or move them, with their whole team) to the left or right of a parent. */
+/** Whether `userId` sits somewhere in `rootId`'s team (or is `rootId`). */
+async function inTeamOf(db: Db, userId: string, rootId: string): Promise<boolean> {
+  let cursor: string | null = userId;
+  for (let steps = 0; cursor && steps < 10_000; steps++) {
+    if (cursor === rootId) return true;
+    const up: { parent_user_id: string } | null = await maybeOne<{ parent_user_id: string }>(db, 'select parent_user_id from public.binary_placements where user_id = $1', [cursor]);
+    cursor = up?.parent_user_id ?? null;
+  }
+  return false;
+}
+
+/** The last member down `side`'s outer edge from `rootId` (the root itself if that side is free). */
+async function outerEdge(db: Db, rootId: string, side: Side): Promise<string> {
+  let cursor = rootId;
+  for (let steps = 0; steps < 10_000; steps++) {
+    const child = await maybeOne<{ user_id: string }>(db, 'select user_id from public.binary_placements where parent_user_id = $1 and side = $2', [cursor, side]);
+    if (!child) return cursor;
+    cursor = child.user_id;
+  }
+  throw new NetworkError('Team tree too deep', 'not_allowed');
+}
+
+/**
+ * Place a member (or move them, with their whole team) to the left or right of
+ * any parent. If that spot is taken, the member there moves down (with their
+ * team) to the end of the same side under the newly placed member, so the
+ * administrator can put anyone anywhere. Both moves are recorded.
+ */
 export async function setPlacement(
   db: Db,
   args: { userId: string; parentMemberCode: string; side: Side; reason: string; staffUserId: string; actor: Actor },
@@ -79,11 +106,36 @@ export async function setPlacement(
   const reason = requireReason(args.reason);
   const parent = await memberByCode(db, args.parentMemberCode);
   if (parent.user_id === args.userId) throw new NetworkError('A member cannot be placed under themselves', 'not_allowed');
+  // One tree edit at a time: moves read and rewrite several positions.
+  await db.query("select pg_advisory_xact_lock(hashtext('binary_tree'))");
   const before = await maybeOne<{ parent_user_id: string; side: Side }>(db, 'select parent_user_id, side from public.binary_placements where user_id = $1 for update', [
     args.userId,
   ]);
   if (before && before.parent_user_id === parent.user_id && before.side === args.side) return;
+  if (await inTeamOf(db, parent.user_id, args.userId)) throw new NetworkError('A member cannot be placed inside their own team', 'not_allowed');
+
+  const occupant = await maybeOne<{ user_id: string; member_code: string }>(
+    db,
+    `select b.user_id, p.member_code from public.binary_placements b join public.user_profiles p on p.user_id = b.user_id
+      where b.parent_user_id = $1 and b.side = $2 for update of b`,
+    [parent.user_id, args.side],
+  );
+  let displaced: { userId: string; memberCode: string; newParentId: string } | null = null;
   try {
+    if (occupant) {
+      if (await inTeamOf(db, args.userId, occupant.user_id)) {
+        throw new NetworkError(`This member is inside ${occupant.member_code}'s team, who holds that spot. Move ${occupant.member_code} first.`, 'not_allowed');
+      }
+      // Free the spot first: the occupant goes to the end of the same side under the member being placed.
+      const edge = await outerEdge(db, args.userId, args.side);
+      await db.query('update public.binary_placements set parent_user_id = $2, side = $3, placed_by = $4, placed_at = now() where user_id = $1', [
+        occupant.user_id,
+        edge,
+        args.side,
+        args.staffUserId,
+      ]);
+      displaced = { userId: occupant.user_id, memberCode: occupant.member_code, newParentId: edge };
+    }
     if (before) {
       await db.query('update public.binary_placements set parent_user_id = $2, side = $3, placed_by = $4, placed_at = now() where user_id = $1', [
         args.userId,
@@ -102,14 +154,16 @@ export async function setPlacement(
   } catch (err) {
     rethrow(err);
   }
-  await db.query(
-    `insert into public.placement_history (user_id, old_parent_id, old_side, new_parent_id, new_side, reason, changed_by)
-     values ($1, $2, $3, $4, $5, $6, $7)`,
-    [args.userId, before?.parent_user_id ?? null, before?.side ?? null, parent.user_id, args.side, reason, args.staffUserId],
-  );
+  const history = `insert into public.placement_history (user_id, old_parent_id, old_side, new_parent_id, new_side, reason, changed_by)
+     values ($1, $2, $3, $4, $5, $6, $7)`;
+  if (displaced) {
+    await db.query(history, [displaced.userId, parent.user_id, args.side, displaced.newParentId, args.side, `Moved down to make room: ${reason}`, args.staffUserId]);
+  }
+  await db.query(history, [args.userId, before?.parent_user_id ?? null, before?.side ?? null, parent.user_id, args.side, reason, args.staffUserId]);
   await recordAudit(db, args.actor, before ? 'network.member_moved' : 'network.member_placed', { type: 'user', id: args.userId }, {
     previous: before ? { parentUserId: before.parent_user_id, side: before.side } : null,
     next: { parent: parent.member_code, side: args.side },
+    displaced: displaced ? { member: displaced.memberCode, newParentUserId: displaced.newParentId, side: args.side } : null,
     reason,
   });
 }

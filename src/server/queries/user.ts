@@ -264,6 +264,25 @@ export interface ActivityItem {
   pendingDelta: bigint;
 }
 
+/**
+ * Total income in one token: every credit to the member's cash paid out of the
+ * operator's reward fund (referral rewards, bonuses for work, matching and rank
+ * rewards), net of reversals. Deposits never touch the fund, so they are excluded.
+ */
+export async function getRewardIncome(db: Db, userId: string, tokenId: number): Promise<bigint> {
+  const r = await maybeOne<{ total: string }>(
+    db,
+    `select coalesce(sum(case when l.direction = 'C' then l.amount else -l.amount end), 0)::text as total
+       from public.journal_lines l
+       join public.ledger_accounts a on a.id = l.account_id and a.purpose = 'user_cash'
+      where a.user_id = $1 and l.token_id = $2
+        and exists (select 1 from public.journal_lines f join public.ledger_accounts fa on fa.id = f.account_id
+                     where f.entry_id = l.entry_id and fa.purpose = 'referral_reward_fund')`,
+    [userId, tokenId],
+  );
+  return parseBase(r?.total);
+}
+
 /** The customer's ledger activity: every journal entry touching their accounts. */
 export async function listActivity(db: Db, userId: string, limit = 50, before?: string): Promise<ActivityItem[]> {
   const rows = await many<{

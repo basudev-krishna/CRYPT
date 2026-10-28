@@ -63,5 +63,6 @@ export const EVENT_LABELS: Record<string, string> = {
   referral_reward: 'Referral reward',
   manual_adjustment: 'Adjusted by administrator',
   referral_bonus: 'Referral bonus',
+  income_correction: 'Income corrected by administrator',
   reversal: 'Correction (reversal)',
 };

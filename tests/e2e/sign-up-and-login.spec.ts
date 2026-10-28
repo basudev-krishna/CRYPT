@@ -5,10 +5,14 @@ import type pg from 'pg';
 import { adminDb, cleanupE2eUsers, createConfirmedUser, login, PASSWORD } from './helpers';
 
 let db: pg.Pool;
+/** The referral id is required: sign-ups without a ?ref link use this member's. */
+let sponsorCode: string;
 
 test.beforeAll(async () => {
   db = adminDb();
   await cleanupE2eUsers(db);
+  const s = await createConfirmedUser(db);
+  sponsorCode = (await db.query('select member_code from public.user_profiles where user_id = $1', [s.id])).rows[0].member_code as string;
 });
 
 test.afterAll(async () => {
@@ -16,9 +20,11 @@ test.afterAll(async () => {
   await db.end();
 });
 
-/** Fills the register form; the username is the email's local part. */
-async function fillRegister(page: import('@playwright/test').Page, email: string, side?: 'left' | 'right') {
-  if (side) await page.getByRole('radio', { name: new RegExp(`${side} team`, 'i') }).click();
+/** Fills the register form; the username is the email's local part. A pre-filled referral id is kept. */
+async function fillRegister(page: import('@playwright/test').Page, email: string, side: 'left' | 'right' = 'right') {
+  const referral = page.getByLabel('Referral id');
+  if (!(await referral.inputValue())) await referral.fill(sponsorCode);
+  await page.getByRole('radio', { name: new RegExp(`${side} team`, 'i') }).click();
   await page.getByLabel('Full name').fill('E2E Applicant');
   await page.getByLabel('Username').fill(`u_${email.split('@')[0]}`);
   await page.getByLabel('Email').fill(email);
@@ -50,11 +56,11 @@ test('a referral link pre-fills the referral id and links the new member to the 
   // Following the real link: the id is pre-filled, and the new profile is permanently linked to the sponsor.
   const email = `${randomUUID().slice(0, 8)}@e2e.test.local`;
   await page.goto(link);
-  await expect(page.getByLabel('Referral id (optional)')).toHaveValue(code);
+  await expect(page.getByLabel('Referral id')).toHaveValue(code);
   await expect(page.getByText('Choose Your Team Position')).toBeVisible();
   await fillRegister(page, email, 'left');
   // "Check your inbox" when email confirmation is on, the dashboard when it is off: either way the account exists.
-  await expect(page.getByText('Check your inbox').or(page.getByRole('heading', { name: 'Your account at a glance' }))).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Check your inbox').or(page.getByRole('heading', { name: 'Your account', exact: true }))).toBeVisible({ timeout: 30_000 });
   const row = await db.query('select p.sponsor_user_id from public.user_profiles p join auth.users u on u.id = p.user_id where u.email = $1', [email]);
   expect(row.rows[0]?.sponsor_user_id).toBe(sponsor.id);
   // The chosen side was placed with the account.

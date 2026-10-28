@@ -34,7 +34,7 @@ function parseRates(text: string): { level: number; rate_bps: number }[] | null 
   return out;
 }
 
-/** One rank per line: "ORG1 1500 1500 150 50" = code, left, right, own earnings, bonus (USD). */
+/** One rank per line: "E1 1500 1500 150 50" = code, left, right, own earnings, bonus (USD). */
 function parseRanks(text: string): Rank[] | null {
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
   if (lines.length < 1 || lines.length > 20) return null;
@@ -174,7 +174,7 @@ export function ProgramPolicyForm({ initial, tokens }: { initial: ProgramFormVal
       <Field
         label="Rank ladder"
         htmlFor="pp-ranks"
-        error={ranks ? null : 'One rank per line: code left right own bonus, e.g. ORG1 1500 1500 150 50'}
+        error={ranks ? null : 'One rank per line: code left right own bonus, e.g. E1 1500 1500 150 50'}
         hint="Per line: code, left team volume, right team volume, own earnings, bonus (all USD). Ranks are reached in this order and kept permanently."
       >
         <Textarea id="pp-ranks" value={ranksText} onChange={(e) => setRanksText(e.target.value)} rows={10} spellCheck={false} className="font-mono text-xs" />

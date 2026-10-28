@@ -13,11 +13,11 @@ export interface FloatOption {
   balance: string; // formatted
 }
 
-const FUNDS: Record<Fund, string> = { operator_float: 'Operator float', referral_reward_fund: 'Referral bonus (referral fund)' };
+const FUNDS: Record<Fund, string> = { operator_float: 'Balance (operator float)', referral_reward_fund: 'Income (referral fund)' };
 
 /**
- * Credit or debit a member against the operator float, or award a referral
- * bonus from the referral fund. Posted by the worker within seconds.
+ * Credit or debit a member against the operator float, or award / correct
+ * income against the referral fund. Posted by the worker within seconds.
  */
 export function AdjustmentForm({ userId, floats }: { userId: string; floats: FloatOption[] }) {
   const router = useRouter();
@@ -38,11 +38,15 @@ export function AdjustmentForm({ userId, floats }: { userId: string; floats: Flo
     );
   }
   const funds = [...new Set(floats.map((f) => f.fund))];
-  const effectiveDirection = fund === 'referral_reward_fund' ? 'credit' : direction;
+  const effectiveDirection = direction;
   const symbol = options.find((f) => f.tokenId === tokenId)?.symbol ?? '';
   async function submit() {
     const text =
-      effectiveDirection === 'credit' ? `Credit ${amount} ${symbol} to this member from the ${FUNDS[fund].toLowerCase()}?` : `Debit ${amount} ${symbol} from this member into your float?`;
+      effectiveDirection === 'credit'
+        ? `Credit ${amount} ${symbol} to this member from the ${FUNDS[fund].toLowerCase()}?`
+        : fund === 'referral_reward_fund'
+          ? `Take ${amount} ${symbol} of income back from this member into the referral fund?`
+          : `Debit ${amount} ${symbol} from this member into your float?`;
     if (!window.confirm(text)) return;
     setBusy(true);
     setMsg(null);
@@ -75,8 +79,16 @@ export function AdjustmentForm({ userId, floats }: { userId: string; floats: Flo
             ))}
           </Select>
         </Field>
-        <Field label="Direction" htmlFor="adj-direction" hint={fund === 'referral_reward_fund' ? 'Bonuses are credits' : direction === 'credit' ? 'They paid you personally' : 'You paid them personally'}>
-          <Select id="adj-direction" value={effectiveDirection} disabled={fund === 'referral_reward_fund'} onChange={(e) => setDirection(e.target.value as 'credit' | 'debit')}>
+        <Field label="Direction" htmlFor="adj-direction" hint={
+            fund === 'referral_reward_fund'
+              ? direction === 'credit'
+                ? 'A bonus or income they are owed'
+                : 'Income paid by mistake, returned to the fund'
+              : direction === 'credit'
+                ? 'They paid you personally'
+                : 'You paid them personally'
+          }>
+          <Select id="adj-direction" value={effectiveDirection} onChange={(e) => setDirection(e.target.value as 'credit' | 'debit')}>
             <option value="credit">Credit (add to balance)</option>
             <option value="debit">Debit (take from balance)</option>
           </Select>
@@ -98,7 +110,7 @@ export function AdjustmentForm({ userId, floats }: { userId: string; floats: Flo
         <Textarea id="adj-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={2} />
       </Field>
       <Button className="h-8 px-3 text-xs" disabled={busy || !amount.trim() || reason.trim().length < 10} onClick={submit}>
-        {busy ? '…' : fund === 'referral_reward_fund' ? 'Award bonus' : effectiveDirection === 'credit' ? 'Credit member' : 'Debit member'}
+        {busy ? '…' : fund === 'referral_reward_fund' ? (effectiveDirection === 'credit' ? 'Award income' : 'Correct income') : effectiveDirection === 'credit' ? 'Credit member' : 'Debit member'}
       </Button>
       {msg ? <Notice tone={msg.ok ? 'success' : 'danger'}>{msg.text}</Notice> : null}
     </div>

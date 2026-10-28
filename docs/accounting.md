@@ -68,6 +68,7 @@ Distinct customer figures:
 | Referral fund top-up (operator receipt allocated by admin) | D `suspense_deposits` / C `referral_reward_fund` |
 | Referral reward paid (admin-approved, worker-posted) | D `referral_reward_fund` / C `user_cash` (sponsor) |
 | Matching bonus or rank reward paid (admin-approved against the funded pool, worker-posted, event `program_reward`) | D `referral_reward_fund` / C `user_cash` (beneficiary) |
+| Income correction (admin takes back income paid by mistake, worker-posted, event `income_correction`) | D `user_cash` (member) / C `referral_reward_fund` |
 | Operator float top-up (operator receipt allocated by admin) | D `suspense_deposits` / C `operator_float` |
 | Manual credit (member paid the admin personally) | D `operator_float` / C `user_cash` |
 | Manual debit (admin paid the member personally) | D `user_cash` / C `operator_float` |

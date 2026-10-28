@@ -21,6 +21,7 @@ const FLOW_LABELS: Record<string, string> = {
   deposit_allocated: 'Operator funding (group-wallet receipts)',
   referral_reward: 'Referral rewards paid',
   referral_bonus: 'Bonuses for work paid / reversed',
+  income_correction: 'Income corrections returned to the pool',
   program_reward: 'Matching and rank rewards paid',
   reversal: 'Ledger reversals',
 };

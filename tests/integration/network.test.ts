@@ -57,13 +57,12 @@ describe('sponsor corrections', () => {
 });
 
 describe('left/right positions', () => {
-  it('places, refuses taken sides and loops, moves whole teams and counts each side', async () => {
+  it('places, refuses loops, moves whole teams and counts each side', async () => {
     const root = await createUser();
-    const [l, r, ll, x] = [await createUser(), await createUser(), await createUser(), await createUser()];
+    const [l, r, ll] = [await createUser(), await createUser(), await createUser()];
     await place(l, root, 'left');
     await place(r, root, 'right');
     await place(ll, l, 'left');
-    await expect(place(x, root, 'left')).rejects.toMatchObject({ code: 'position_taken' });
     await expect(place(root, ll, 'right')).rejects.toMatchObject({ code: 'not_allowed' }); // root under its own team
 
     let t = (await teamTree(web, root))!;
@@ -82,6 +81,33 @@ describe('left/right positions', () => {
     expect((await admin.query('select count(*)::int as n from public.placement_history where user_id = $1', [l])).rows[0].n).toBe(3);
     await expect(admin.query('delete from public.placement_history')).rejects.toThrow();
   });
+
+  it('places anyone on a taken spot by moving the member there down, with their team, under the newcomer', async () => {
+    const root = await createUser();
+    const [a, a1, n, m] = [await createUser(), await createUser(), await createUser(), await createUser()];
+    await place(a, root, 'left');
+    await place(a1, a, 'left');
+    await place(m, n, 'left'); // n already has a left team
+
+    // n takes a's spot; a (with a1) goes to the end of n's left side, under m.
+    await place(n, root, 'left');
+    const t = (await teamTree(web, root))!;
+    expect(t.left?.memberCode).toBe(await code(n));
+    expect(t.left?.left?.memberCode).toBe(await code(m));
+    expect(t.left?.left?.left?.memberCode).toBe(await code(a));
+    expect(t.left?.left?.left?.left?.memberCode).toBe(await code(a1));
+    expect(t.leftCount).toBe(4);
+    const moved = await one<{ old_parent_id: string; new_parent_id: string; reason: string }>(
+      admin,
+      'select old_parent_id, new_parent_id, reason from public.placement_history where user_id = $1 order by id desc limit 1',
+      [a],
+    );
+    expect(moved).toMatchObject({ old_parent_id: root, new_parent_id: m });
+    expect(moved.reason).toMatch(/^Moved down to make room/);
+
+    // A member inside the occupant's team cannot take the occupant's spot.
+    await expect(place(a1, root, 'left')).rejects.toMatchObject({ code: 'not_allowed' });
+  });
 });
 
 describe('referral bonuses', () => {
@@ -97,11 +123,10 @@ describe('referral bonuses', () => {
     await withTransaction(worker, (db) => postAllocation(db, a.id, service));
   }
 
-  it('awards bonuses from the referral fund only, as credits, and reversals return the money', async () => {
+  it('awards bonuses from the referral fund only, and reversals return the money', async () => {
     const member = await createUser();
     const bonus = (direction: 'credit' | 'debit') =>
       withTransaction(web, (db) => createAdjustment(db, { userId: member, tokenId, direction, amount: '15', reason: 'Bonus for growing the team', fund: 'referral_reward_fund', staffUserId: adminId, actor: actor() }));
-    await expect(bonus('debit')).rejects.toMatchObject({ code: 'invalid_direction' });
     const b = await bonus('credit');
     expect(await withTransaction(worker, (db) => postAdjustment(db, b.id, service))).toBe('deferred'); // empty fund
     await fundReferrals('20');

@@ -13,6 +13,7 @@ import {
   Vault,
   Gauge,
   KeyRound,
+  LifeBuoy,
   Landmark,
   LayoutDashboard,
   LineChart,
@@ -45,6 +46,7 @@ export const NAV_ICONS = {
   compliance: ShieldCheck,
   audit: ScrollText,
   ledger: BookOpenCheck,
+  support: LifeBuoy,
 } satisfies Record<string, LucideIcon>;
 export type NavIcon = keyof typeof NAV_ICONS;
 

@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { pageUser } from '@/server/http/auth';
 import { webDb } from '@/server/db';
 import { memberProgramOverview } from '@/server/referrals/program';
+import { getDashboard, getRewardIncome } from '@/server/queries/user';
 import { rankProgress, usdFixed } from '@/server/referrals/program-math';
 import { Badge, Card, CardHeader, EmptyState, Mono, Notice, PageHeader, Table, Td } from '@/components/ui/primitives';
 import { Money } from '@/components/ui/money';
@@ -32,7 +33,11 @@ const share = (have: bigint, need: string) => {
 
 export default async function RewardsPage() {
   const user = await pageUser();
-  const o = await memberProgramOverview(webDb(), user.id);
+  const db = webDb();
+  const [o, d] = await Promise.all([memberProgramOverview(db, user.id), getDashboard(db, user.id)]);
+  const income = d.token ? await getRewardIncome(db, user.id, d.token.id) : 0n;
+  const dec = d.token?.decimals ?? 6;
+  const sym = d.token?.symbol ?? 'USDT';
   const { program, volumes: v } = o;
   const progress = rankProgress(v, o.highestRankOrder, program.ranks.levels);
   const achieved = new Map(o.history.map((h) => [h.rank_code, h.achieved_at]));
@@ -42,7 +47,6 @@ export default async function RewardsPage() {
     <>
       <PageHeader
         title="Rank & matching"
-        description="Your team, rank and matching bonus. Every amount here is measured in operator-funded earnings (referral rewards and bonuses for work), never in deposits. Rewards are paid by EliteWhale from its own reward pool after an administrator approves each one; nothing here is guaranteed income."
         actions={<Link className="text-sm font-medium text-accent hover:underline" href="/api/rewards/statement">Download statement (CSV)</Link>}
       />
       {!payoutsOn ? (
@@ -53,11 +57,10 @@ export default async function RewardsPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-6 md:grid-cols-4">
+      <div className="grid gap-6 md:grid-cols-3">
         <Stat label="Current rank" value={progress.current ?? '—'} emphasis={progress.current !== null} sub={progress.next ? `Next: ${progress.next.code}` : 'Top rank reached'} />
         <Stat label="Left team" value={v.leftCount} sub={<>Volume <Usd value={v.left} /></>} />
         <Stat label="Right team" value={v.rightCount} sub={<>Volume <Usd value={v.right} /></>} />
-        <Stat label="Direct referrals" value={o.directReferrals} sub={`Total team ${v.leftCount + v.rightCount}`} />
       </div>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-2">
@@ -66,6 +69,23 @@ export default async function RewardsPage() {
             title="Minimum matching amount"
             subtitle="A threshold on each side's operator-funded volume before matching can pay you. It is not a deposit requirement and not a guarantee of payment."
           />
+          <dl className="mb-5 grid gap-3 sm:grid-cols-3">
+            {(
+              [
+                ['Total balance', d.totalAccountValue, 'Your whole account value'],
+                ['Total income', income, 'All rewards paid to you'],
+                ['Available to withdraw', d.available, 'Ready to withdraw now'],
+              ] as const
+            ).map(([label, amount, hint]) => (
+              <div key={label} className="rounded-xl bg-surface-3/60 p-3 ring-1 ring-black/5">
+                <dt className="text-xs text-fg-muted">{label}</dt>
+                <dd className="mt-1 text-base font-semibold">
+                  <Money value={amount} decimals={dec} symbol={sym} />
+                </dd>
+                <dd className="mt-0.5 text-[11px] text-fg-subtle">{hint}</dd>
+              </div>
+            ))}
+          </dl>
           {(['left', 'right'] as const).map((side) => {
             const have = v[side];
             const need = side === 'left' ? program.matching.min_left : program.matching.min_right;
@@ -141,7 +161,7 @@ export default async function RewardsPage() {
                 [
                   ['Left team', v.left, progress.next.left, progress.leftBps],
                   ['Right team', v.right, progress.next.right, progress.rightBps],
-                  ['Your own earnings', v.self, progress.next.self, progress.selfBps],
+                  ['Self investment', v.self, progress.next.self, progress.selfBps],
                 ] as const
               ).map(([label, have, need, bps]) => (
                 <div key={label}>
@@ -161,21 +181,34 @@ export default async function RewardsPage() {
 
       <Card className="mt-6">
         <CardHeader title="Ranks" subtitle="Ranks are reached in order and kept permanently. A rank reached while rank rewards are off is not paid later." />
-        <Table head={['Rank', 'Left team', 'Right team', 'Own earnings', 'Listed bonus', 'Status']}>
+        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
           {program.ranks.levels.map((r) => {
             const at = achieved.get(r.code);
             return (
-              <tr key={r.code}>
-                <Td className="font-medium">{r.code}</Td>
-                <Td><Usd value={usdFixed(r.left)} /></Td>
-                <Td><Usd value={usdFixed(r.right)} /></Td>
-                <Td><Usd value={usdFixed(r.self)} /></Td>
-                <Td><Usd value={usdFixed(r.bonus)} /></Td>
-                <Td>{at ? <Badge tone="success" title={dateTime(at)}>Reached</Badge> : <span className="text-fg-subtle">—</span>}</Td>
-              </tr>
+              <li key={r.code} className={`rounded-2xl p-4 ring-1 ${at ? 'bg-gain/[0.06] ring-gain/30' : 'bg-surface-3/50 ring-black/5'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-heading text-lg">{r.code}</span>
+                  {at ? <Badge tone="success" title={dateTime(at)}>Reached</Badge> : null}
+                </div>
+                <dl className="mt-3 space-y-1.5 text-sm">
+                  {(
+                    [
+                      ['Left team', r.left],
+                      ['Right team', r.right],
+                      ['Self investment', r.self],
+                      ['Bonus', r.bonus],
+                    ] as const
+                  ).map(([label, value]) => (
+                    <div key={label} className="flex items-baseline justify-between gap-3">
+                      <dt className="text-fg-muted">{label}</dt>
+                      <dd className="font-medium"><Usd value={usdFixed(value)} /></dd>
+                    </div>
+                  ))}
+                </dl>
+              </li>
             );
           })}
-        </Table>
+        </ul>
       </Card>
 
       <Card className="mt-6">

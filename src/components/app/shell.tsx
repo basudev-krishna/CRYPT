@@ -19,6 +19,7 @@ const USER_NAV: NavItem[] = [
   { href: '/rewards', label: 'Rank & matching', icon: 'rewards' },
   { href: '/settings', label: 'Profile', icon: 'profile' },
   { href: '/settings/security', label: 'Security', icon: 'security' },
+  { href: '/support', label: 'Support', icon: 'support' },
 ];
 
 const ADMIN_NAV: NavItem[] = [

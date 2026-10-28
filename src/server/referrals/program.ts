@@ -121,11 +121,11 @@ export async function memberVolumes(db: Db, userIds: string[] | null): Promise<M
   );
 }
 
-/** Highest rank order reached per member (0 for none). */
+/** Highest rank order held per member (0 for none), after administrator corrections. */
 async function highestRanks(db: Db, userIds: string[] | null, ranks: RewardsProgram['ranks']['levels']): Promise<Map<string, number>> {
   const rows = await many<{ user_id: string; rank_code: string }>(
     db,
-    'select user_id, rank_code from public.rank_achievements where $1::uuid[] is null or user_id = any($1::uuid[])',
+    'select user_id, rank_code from public.member_ranks where $1::uuid[] is null or user_id = any($1::uuid[])',
     [userIds],
   );
   const map = new Map<string, number>();
@@ -222,7 +222,8 @@ export async function evaluateRanks(db: Db): Promise<{ ranks: number; rewards: n
   const program = policy.params;
   const [vols, held, active] = await Promise.all([
     memberVolumes(db, null),
-    many<{ user_id: string; rank_code: string }>(db, 'select user_id, rank_code from public.rank_achievements'),
+    // A rank an administrator corrected (revoked or granted) is settled: never re-reached or rewarded automatically.
+    many<{ user_id: string; rank_code: string }>(db, 'select user_id, rank_code from public.rank_achievements union select user_id, rank_code from public.rank_corrections'),
     many<{ user_id: string }>(db, "select user_id from public.user_profiles where account_status = 'active'"),
   ]);
   const have = new Set(held.map((h) => `${h.user_id}:${h.rank_code}`));
@@ -410,11 +411,15 @@ export async function placementAvailability(db: Db, referralCode: string): Promi
     [referralCode.trim().toUpperCase()],
   );
   if (!sponsor) return null;
-  const taken = await many<{ side: Side }>(db, 'select side from public.binary_placements where parent_user_id = $1', [sponsor.user_id]);
-  const { params } = await effectiveProgram(db);
+  const [taken, { params }, admin] = await Promise.all([
+    many<{ side: Side }>(db, 'select side from public.binary_placements where parent_user_id = $1', [sponsor.user_id]),
+    effectiveProgram(db),
+    maybeOne(db, "select 1 from public.staff_roles where user_id = $1 and role = 'admin'", [sponsor.user_id]),
+  ]);
   return {
     sponsorCode: sponsor.member_code,
-    mode: params.placement_mode,
+    // An administrator's referral id never fills up: sign-ups go further down the chosen side (see place_new_member).
+    mode: admin ? 'outer' : params.placement_mode,
     direct: { left: !taken.some((t) => t.side === 'left'), right: !taken.some((t) => t.side === 'right') },
   };
 }
@@ -465,12 +470,83 @@ export async function adminProgramRewards(db: Db) {
   );
 }
 
+/** Ranks the member holds now, after administrator corrections. */
 export async function rankHistory(db: Db, userId: string) {
-  return many<{ rank_code: string; achieved_at: Date; left_volume: string; right_volume: string; self_volume: string }>(
+  return many<{ rank_code: string; achieved_at: Date; source: 'achieved' | 'granted'; left_volume: string; right_volume: string; self_volume: string }>(
     db,
-    'select rank_code, achieved_at, left_volume::text, right_volume::text, self_volume::text from public.rank_achievements where user_id = $1 order by rank_order',
+    'select rank_code, achieved_at, source, left_volume::text, right_volume::text, self_volume::text from public.member_ranks where user_id = $1 order by achieved_at',
     [userId],
   );
+}
+
+/** Every rank correction for a member, newest first. */
+export async function rankCorrections(db: Db, userId: string) {
+  return many<{ id: string; rank_code: string; action: 'revoke' | 'grant'; reason: string; created_at: Date; created_by_email: string | null }>(
+    db,
+    `select c.id::text, c.rank_code, c.action, c.reason, c.created_at, u.email as created_by_email
+       from public.rank_corrections c left join public.user_profiles u on u.user_id = c.created_by
+      where c.user_id = $1 order by c.id desc limit 50`,
+    [userId],
+  );
+}
+
+/**
+ * Administrator: revoke a rank a member holds, or grant one they do not. The
+ * correction is appended (never edited) and the latest one per rank wins, so a
+ * mistake is undone with the opposite correction. Revoking rejects the rank's
+ * reward if it is still pending review; once approved it is left to be paid and
+ * taken back afterwards with an income correction. Granting creates no reward.
+ */
+export async function correctRank(
+  db: Db,
+  args: { userId: string; rankCode: string; action: 'revoke' | 'grant'; reason: string; staffUserId: string; actor: Actor },
+): Promise<void> {
+  const reason = args.reason.trim();
+  if (reason.length < MIN_NOTE) throw new ProgramRewardError(`A reason of at least ${MIN_NOTE} characters is required`, 'reason_required');
+  const { params: program } = await effectiveProgram(db);
+  if (rankOrder(args.rankCode, program.ranks.levels) === 0) throw new ProgramRewardError('Unknown rank', 'invalid_rank');
+  const member = await maybeOne<{ user_id: string }>(db, 'select user_id from public.user_profiles where user_id = $1', [args.userId]);
+  if (!member) throw new ProgramRewardError('Member not found', 'not_found');
+  // Serialize corrections for this member.
+  await db.query("select pg_advisory_xact_lock(hashtext('rank_correction:' || $1::text))", [args.userId]);
+  const held = await maybeOne<{ source: string }>(db, 'select source from public.member_ranks where user_id = $1 and rank_code = $2', [args.userId, args.rankCode]);
+  if (args.action === 'revoke' && !held) throw new ProgramRewardError(`The member does not hold ${args.rankCode}`, 'invalid_state');
+  if (args.action === 'grant' && held) throw new ProgramRewardError(`The member already holds ${args.rankCode}`, 'invalid_state');
+
+  let rejectedRewardId: string | null = null;
+  if (args.action === 'revoke') {
+    const reward = await maybeOne<{ id: string; status: string }>(
+      db,
+      "select id, status from public.program_rewards where kind = 'rank' and beneficiary_user_id = $1 and rank_code = $2 for update",
+      [args.userId, args.rankCode],
+    );
+    if (reward?.status === 'approved') {
+      throw new ProgramRewardError('This rank reward is approved and about to be paid. Let it post, then take it back with an income correction and revoke the rank.', 'reward_approved');
+    }
+    if (reward?.status === 'pending') {
+      await db.query("update public.program_rewards set status = 'rejected', reviewed_by = $2, reviewed_at = now(), review_note = $3 where id = $1", [
+        reward.id,
+        args.staffUserId,
+        `Rank revoked: ${reason}`,
+      ]);
+      rejectedRewardId = reward.id;
+    }
+  }
+
+  const row = await one<{ id: string }>(
+    db,
+    'insert into public.rank_corrections (user_id, rank_code, action, reason, created_by) values ($1, $2, $3, $4, $5) returning id::text',
+    [args.userId, args.rankCode, args.action, reason, args.staffUserId],
+  );
+  const details = { rankCode: args.rankCode, action: args.action, reason, rejectedRewardId };
+  await recordAudit(db, args.actor, `program.rank_${args.action === 'revoke' ? 'revoked' : 'granted'}`, { type: 'user', id: args.userId }, details);
+  await raiseRiskEvent(db, { userId: args.userId, kind: 'rank_corrected', severity: 'high', subjectType: 'rank_correction', subjectId: row.id, details });
+  await notify(db, {
+    userId: args.userId,
+    kind: args.action === 'revoke' ? 'rank_revoked' : 'rank_granted',
+    payload: { rank: args.rankCode, reason },
+    dedupeKey: `rank_correction:${row.id}`,
+  });
 }
 
 /** Everything the member rewards page shows, from the database (never client input). */

@@ -13,8 +13,10 @@
  * pending adjustment can be cancelled.
  *
  * An adjustment may instead draw on the referral reward fund (operator money
- * for referral bonuses the administrator awards): credits only, plus their
- * reversals, which return the money to the fund.
+ * for referral bonuses the administrator awards). A credit there is income; a
+ * debit is an income correction that returns money paid by mistake (a glitch,
+ * a double payment) to the fund, so it never lands in the operator's float.
+ * Both count against the member's operator-funded earnings, like reversals.
  *
  * The web role records; the worker posts. With a single administrator there
  * is no second approver, so every adjustment needs a reason, is audited, raises
@@ -58,9 +60,6 @@ export async function createAdjustment(
   args: { userId: string; tokenId: number; direction: Direction; amount: string; reason: string; fund?: Fund; staffUserId: string; actor: Actor },
 ): Promise<{ id: string }> {
   const fund = args.fund ?? 'operator_float';
-  if (fund === 'referral_reward_fund' && args.direction !== 'credit') {
-    throw new AdjustmentError('Referral bonuses are credits; reverse one to take it back', 'invalid_direction');
-  }
   const reason = args.reason.trim();
   if (reason.length < MIN_REASON) throw new AdjustmentError(`A reason of at least ${MIN_REASON} characters is required`, 'reason_required');
   const token = await getToken(db, args.tokenId);
@@ -127,9 +126,20 @@ export type AdjustmentOutcome = 'posted' | 'deferred' | 'failed' | 'unchanged';
  * Idempotent via the status check under lock and the ledger key.
  */
 export async function postAdjustment(db: Db, adjustmentId: string, actor: Actor): Promise<AdjustmentOutcome> {
-  const a = await maybeOne<{ id: string; user_id: string; token_id: number; direction: Direction; amount_base: string; reason: string; status: string; error: string | null; fund: Fund }>(
+  const a = await maybeOne<{
+    id: string;
+    user_id: string;
+    token_id: number;
+    direction: Direction;
+    amount_base: string;
+    reason: string;
+    status: string;
+    error: string | null;
+    fund: Fund;
+    reverses_adjustment_id: string | null;
+  }>(
     db,
-    'select id, user_id, token_id, direction, amount_base::text, reason, status, error, fund from public.manual_adjustments where id = $1 for update',
+    'select id, user_id, token_id, direction, amount_base::text, reason, status, error, fund, reverses_adjustment_id from public.manual_adjustments where id = $1 for update',
     [adjustmentId],
   );
   if (!a || a.status !== 'pending') return 'unchanged';
@@ -158,12 +168,14 @@ export async function postAdjustment(db: Db, adjustmentId: string, actor: Actor)
     return 'failed';
   }
 
+  // A standalone debit from the fund is an income correction; a debit that reverses a bonus stays a bonus event.
+  const incomeCorrection = a.fund === 'referral_reward_fund' && a.direction === 'debit' && !a.reverses_adjustment_id;
   const entryId = await postEntry(db, {
     idempotencyKey: `manual_adjustment:${a.id}`,
-    eventType: a.fund === 'operator_float' ? 'manual_adjustment' : 'referral_bonus',
+    eventType: a.fund === 'operator_float' ? 'manual_adjustment' : incomeCorrection ? 'income_correction' : 'referral_bonus',
     sourceType: 'manual_adjustment',
     sourceId: a.id,
-    description: `${a.fund === 'operator_float' ? 'Adjusted by administrator' : 'Referral bonus'}: ${a.reason}`,
+    description: `${a.fund === 'operator_float' ? 'Adjusted by administrator' : incomeCorrection ? 'Income corrected by administrator' : 'Referral bonus'}: ${a.reason}`,
     postedBy: `${actor.type}:${actor.id}`,
     lines: a.direction === 'credit' ? transfer(float, cash, amount) : transfer(cash, float, amount),
     metadata: { direction: a.direction, fund: a.fund },

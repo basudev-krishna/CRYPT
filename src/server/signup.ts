@@ -9,6 +9,7 @@
 import { z } from 'zod';
 import { maybeOne, type Db } from './db-core';
 import { placementAvailability } from './referrals/program';
+import type { Side } from './referrals/network';
 
 export class SignupError extends Error {
   override name = 'SignupError';
@@ -39,16 +40,15 @@ export const registerSchema = z.object({
     .regex(/[a-z]/, 'Add a lower-case letter')
     .regex(/[A-Z]/, 'Add an upper-case letter')
     .regex(/[0-9]/, 'Add a digit'),
+  /** Every member joins through someone: the referral id is required. */
   referralCode: z
-    .string()
+    .string({ error: 'Enter the referral id of the person who referred you' })
     .trim()
     .toUpperCase()
-    .transform((s) => s || null)
-    .pipe(z.string().regex(/^EW-[0-9]{6,}$/, 'Referral ids look like EW-000123').nullable())
-    .optional()
-    .transform((v) => v ?? null),
-  /** Team position under the sponsor; required with a referral id, ignored without one. */
-  teamSide: z.enum(['left', 'right']).nullable().optional().transform((v) => v ?? null),
+    .min(1, 'Enter the referral id of the person who referred you')
+    .regex(/^EW-[0-9]{6,}$/, 'Referral ids look like EW-000123'),
+  /** Team position under the sponsor. */
+  teamSide: z.enum(['left', 'right'], { error: 'Choose the left or right team' }),
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;
@@ -67,7 +67,7 @@ export async function resolveLoginEmail(db: Db, identifier: string): Promise<str
  * called. The database still enforces username uniqueness, so a race between
  * two sign-ups fails safely in the auth trigger.
  */
-export async function checkRegistration(db: Db, input: Pick<RegisterInput, 'username' | 'referralCode'> & { teamSide?: RegisterInput['teamSide'] }): Promise<void> {
+export async function checkRegistration(db: Db, input: { username: string; referralCode: string | null; teamSide?: Side | null }): Promise<void> {
   if (await maybeOne(db, 'select 1 from public.user_profiles where username = $1', [input.username])) {
     throw new SignupError('That username is taken. Choose another.', 'username_taken');
   }
@@ -82,7 +82,7 @@ export async function checkRegistration(db: Db, input: Pick<RegisterInput, 'user
  * under the sponsor. Never switched silently: the applicant chooses again.
  * The auth trigger re-checks under lock, so a race still fails safely.
  */
-async function checkTeamSide(db: Db, referralCode: string, side: RegisterInput['teamSide']): Promise<void> {
+async function checkTeamSide(db: Db, referralCode: string, side: Side | null): Promise<void> {
   if (!side) throw new SignupError('Choose the left or right team.', 'team_side_required');
   const a = await placementAvailability(db, referralCode);
   if (a && a.mode === 'direct' && !a.direct[side]) {

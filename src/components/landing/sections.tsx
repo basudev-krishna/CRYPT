@@ -3,24 +3,46 @@ import {
   ArrowRightCircle,
   BadgeCheck,
   BookLock,
+  Bot,
+  Boxes,
+  Building2,
   Calculator,
+  CandlestickChart,
   CircleDollarSign,
+  Code2,
+  Coins,
+  Copy,
+  CreditCard,
   FileClock,
+  Gamepad2,
   Gauge,
+  Gem,
+  Globe,
+  GraduationCap,
+  Handshake,
+  Infinity as InfinityIcon,
   KeyRound,
   Landmark,
   Layers,
   LineChart,
   ListChecks,
+  Mail,
+  Mountain,
   PauseCircle,
   Scale,
   ScanSearch,
+  Share2,
   ShieldCheck,
+  Target,
+  TrendingUp,
   Undo2,
+  Users,
+  Vote,
   Wallet,
   type LucideIcon,
 } from 'lucide-react';
 import { LogoMark } from './hero';
+import { ELITEWHALE_ABOUT, ELITEWHALE_MISSION, ELITEWHALE_VISION, SOCIAL_LINKS, SUPPORT_EMAIL } from '@/components/support-contact';
 
 /*
  * Marketing sections for the public landing page. Server components only: the
@@ -54,61 +76,229 @@ function IconBadge({ icon: Icon }: { icon: LucideIcon }) {
   );
 }
 
+/* ------------------------------------------------------------- showcase */
+
+const SHOWCASE_VIDEO = 'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260518_003132_8b7edcb6-c64d-4a52-a9ca-879942e122ad.mp4';
+
+/** The brand film, framed on its own below the hero. */
+export function VideoShowcase() {
+  return (
+    <section aria-label="EliteWhale film" className="pb-4 pt-16 sm:pt-20" style={{ background: 'linear-gradient(180deg, #070a12 0%, var(--color-login-bg) 100%)' }}>
+      <div className={container}>
+        <div className="relative overflow-hidden rounded-[32px] shadow-[0_30px_80px_-30px_rgba(0,0,0,0.6)]" style={{ border: '1px solid rgba(217,178,95,0.35)' }}>
+          {/* Gradient shows while the video loads, and stays if it fails. */}
+          <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, #0b1120 0%, #1c2233 60%, #3a2f1a 100%)' }} aria-hidden />
+          <video className="relative block aspect-[16/9] w-full object-cover sm:aspect-[21/9]" src={SHOWCASE_VIDEO} autoPlay muted loop playsInline preload="metadata" aria-hidden />
+          <div className="absolute inset-0" style={{ background: 'linear-gradient(0deg, rgba(6,8,13,0.85) 0%, rgba(6,8,13,0.15) 55%, rgba(6,8,13,0) 100%)' }} aria-hidden />
+          <div className="absolute inset-x-0 bottom-0 p-6 sm:p-10">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-[#d9b25f]">Trade · Invest · Grow · Together</p>
+            <p className="mt-2 text-[#f6efdf]" style={{ ...headingStyle, fontSize: 'clamp(1.4rem, 3.6vw, 2.6rem)' }}>
+              Invest smarter. Grow bigger.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* ------------------------------------------------------------------ about */
 
-const ABOUT = {
-  group: {
-    title: 'A private USDT group, kept on a ledger you can check.',
-    paragraphs: [
-      'EliteWhale is a private group whose members pool USDT on BNB Smart Chain. Deposits go to one group wallet that this app only watches: it holds no keys and cannot move the money.',
-      'The administrator keeps the group ledger here. Every deposit, payout, reward and correction is a balanced, permanent entry, and each member sees their own balance and full history.',
-    ],
-    points: [
-      { icon: Wallet, title: 'Watched group wallet', body: 'Each deposit is matched to you by your signed sending wallet and credited only after enough confirmations.' },
-      { icon: KeyRound, title: 'Payouts signed by the administrator', body: 'Withdrawals are paid by hand from the group wallet, and each payout is checked against the chain.' },
-      { icon: BadgeCheck, title: 'Rewards from the operator only', body: 'Referral, matching and rank rewards come from a reward pool the operator funds. Deposits are never used to pay them.' },
-      { icon: Scale, title: 'No promised returns', body: 'EliteWhale is not a bank and guarantees no income. Balances show what is actually recorded, losses included.' },
-    ],
-  },
-  testnet: {
-    title: 'An investment ledger you can follow end to end.',
-    paragraphs: [
-      'EliteWhale is a testnet demonstration of how a pooled USDT investment can be run in the open: deposits, a unitized pool valued from trade executions, and withdrawals that pass policy checks.',
-      'Everything runs on test tokens with a simulated trading venue. No real funds are involved, so you can try every step and inspect the ledger behind it.',
-    ],
-    points: [
-      { icon: BookLock, title: 'One source of truth', body: 'Balances, statements and the operator view all read from the same double-entry journal.' },
-      { icon: LineChart, title: 'Results from executions', body: 'The pool is valued from imported trades and prices. No fixed rates.' },
-      { icon: ShieldCheck, title: 'Checks before payouts', body: 'Limits, screening and reconciliation must all pass before money leaves.' },
-      { icon: Scale, title: 'No promised returns', body: 'Simulated results are labelled as simulated, and losses are shown.' },
-    ],
-  },
-} as const;
+const ABOUT_POINTS: { icon: LucideIcon; title: string }[] = [
+  { icon: Boxes, title: 'Web3 ecosystem' },
+  { icon: ShieldCheck, title: 'Transparent trading' },
+  { icon: Coins, title: 'Staking & rewards' },
+  { icon: Users, title: 'Community driven' },
+];
 
-export function AboutEliteWhale({ realFunds }: { realFunds: boolean }) {
-  const a = realFunds ? ABOUT.group : ABOUT.testnet;
+/** The group's own description and purpose (from the EliteWhale presentation). */
+export function AboutEliteWhale() {
   return (
     <section id="about" aria-labelledby="about-title" className={`${container} scroll-mt-8 py-20 sm:py-28`}>
-      <div className="grid gap-12 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16">
+      <div className="grid gap-12 lg:grid-cols-[minmax(0,6fr)_minmax(0,6fr)] lg:gap-16">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: 'var(--color-accent)' }}>
             About EliteWhale
           </p>
           <h2 id="about-title" className="mt-3" style={{ ...headingStyle, fontSize: 'clamp(1.5rem, 3.5vw, 2.4rem)' }}>
-            {a.title}
+            Built for real utility and the next generation of Web3 users.
           </h2>
-          {a.paragraphs.map((p) => (
+          {ELITEWHALE_ABOUT.map((p) => (
             <p key={p} className="mt-4 text-[15px] leading-relaxed opacity-75 sm:text-base">
               {p}
             </p>
           ))}
+          <ul className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {ABOUT_POINTS.map((p) => (
+              <li key={p.title} className="flex flex-col items-center gap-2 text-center text-sm font-medium">
+                <IconBadge icon={p.icon} />
+                {p.title}
+              </li>
+            ))}
+          </ul>
         </div>
-        <ul className="grid gap-4 sm:grid-cols-2">
-          {a.points.map((p) => (
-            <li key={p.title} className={`${card} p-6`}>
+        <div className="grid gap-4">
+          <article className={`${card} p-7`}>
+            <IconBadge icon={Target} />
+            <h3 className="mt-4 text-lg font-semibold">Vision</h3>
+            <p className="mt-2 text-[15px] leading-relaxed opacity-75">{ELITEWHALE_VISION}</p>
+          </article>
+          <article className={`${card} p-7`}>
+            <IconBadge icon={Mountain} />
+            <h3 className="mt-4 text-lg font-semibold">Mission</h3>
+            <p className="mt-2 text-[15px] leading-relaxed opacity-75">{ELITEWHALE_MISSION}</p>
+          </article>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ---------------------------------------------------------------- roadmap */
+
+const ROADMAP: { year: number; icon: LucideIcon; title: string; body: string }[] = [
+  { year: 2027, icon: Users, title: 'Foundation & global expansion', body: 'Build a strong global community and reach key markets with a solid ecosystem foundation.' },
+  { year: 2028, icon: Handshake, title: 'Global ecosystem growth', body: 'Expand internationally, establish strategic partnerships, and enhance liquidity and infrastructure.' },
+  { year: 2029, icon: Boxes, title: 'DeFi & technology expansion', body: 'Develop advanced DeFi products, dApps, smart-contract utilities and a broader ecosystem for Web3 users.' },
+  { year: 2030, icon: Globe, title: 'Global Web3 network', body: 'Expand into multiple global markets, strengthen the developer ecosystem, and create strategic blockchain partnerships.' },
+  { year: 2031, icon: TrendingUp, title: 'Mass adoption', body: 'Focus on mainstream Web3 adoption, ecosystem integrations, real-world utility and a larger global community.' },
+  { year: 2032, icon: InfinityIcon, title: 'Global Web3 ecosystem', body: 'Establish EliteWhale as a comprehensive ecosystem connecting users, technology, digital assets and blockchain applications worldwide.' },
+];
+
+export function Roadmap() {
+  return (
+    <section id="roadmap" className="scroll-mt-8 bg-white/40 py-20 sm:py-28">
+      <div className={container}>
+        <SectionHeader eyebrow="Future plan" title="Our roadmap towards a global Web3 ecosystem." intro="Build, expand, innovate, empower. These are plans and targets, not commitments, and timings may change." />
+        <ol className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {ROADMAP.map((r) => (
+            <li key={r.year} className={`${card} p-7`}>
+              <div className="flex items-center justify-between">
+                <IconBadge icon={r.icon} />
+                <span className="text-2xl tabular-nums" style={{ ...headingStyle, color: 'var(--color-accent)' }}>
+                  {r.year}
+                </span>
+              </div>
+              <h3 className="mt-5 text-lg font-semibold">{r.title}</h3>
+              <p className="mt-2 text-[15px] leading-relaxed opacity-75">{r.body}</p>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------ upcoming projects */
+
+const PROJECTS: { icon: LucideIcon; title: string; body: string }[] = [
+  { icon: CreditCard, title: 'Elite Crypto Card', body: 'Spend your crypto anywhere in the world with real utility.' },
+  { icon: Gamepad2, title: 'Gaming', body: 'Play, earn and own with blockchain-powered gaming experiences.' },
+  { icon: CandlestickChart, title: 'Elite Crypto Exchange', body: 'A fast, secure and next-generation crypto exchange.' },
+  { icon: Wallet, title: 'Elite Crypto Wallet', body: 'A secure, simple and powerful Web3 wallet for everyone.' },
+  { icon: CircleDollarSign, title: 'Elite Pay', body: 'Seamless crypto payments for global businesses and users.' },
+  { icon: GraduationCap, title: 'Elite Academy', body: 'Learn, trade and grow with expert-led Web3 education.' },
+  { icon: Vote, title: 'Elite DAO', body: 'A decentralized, community-driven ecosystem.' },
+  { icon: Bot, title: 'Elite AI Agent', body: 'AI-powered trading agents for smarter and faster decisions.' },
+  { icon: LineChart, title: 'Elite Forex Broker', body: 'Trade forex with advanced tools, low spreads and global access.' },
+  { icon: Copy, title: 'Elite Copy Trading', body: 'Follow top traders and copy strategies automatically.' },
+];
+
+export function UpcomingProjects() {
+  return (
+    <section id="projects" className={`${container} scroll-mt-8 py-20 sm:py-28`}>
+      <SectionHeader eyebrow="Upcoming" title="Our upcoming projects." intro="Innovative products for a global Web3 economy. None of these is available yet." />
+      <ul className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        {PROJECTS.map((p, i) => (
+          <li key={p.title} className={`${card} p-6`}>
+            <div className="flex items-center justify-between">
               <IconBadge icon={p.icon} />
-              <h3 className="mt-4 text-base font-semibold">{p.title}</h3>
-              <p className="mt-1.5 text-sm leading-relaxed opacity-75">{p.body}</p>
+              <span className="text-xs font-semibold tabular-nums opacity-40">{String(i + 1).padStart(2, '0')}</span>
+            </div>
+            <h3 className="mt-4 font-semibold">{p.title}</h3>
+            <p className="mt-1.5 text-sm leading-relaxed opacity-75">{p.body}</p>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/* ---------------------------------------------------------- revenue model */
+
+const REVENUE: { icon: LucideIcon; title: string; body: string }[] = [
+  { icon: CandlestickChart, title: 'Forex', body: 'Trading spreads, commissions and premium services for global traders.' },
+  { icon: Coins, title: 'Crypto & Web3', body: 'Trading fees, staking rewards, token utilities and ecosystem products.' },
+  { icon: Building2, title: 'Real estate', body: 'Property investments, development projects and asset-management opportunities.' },
+  { icon: Gem, title: 'Physical gold import & export', body: 'Sourcing, importing and exporting physical gold through secure and trusted supply channels.' },
+  { icon: CreditCard, title: 'Payments', body: 'Transaction fees, cross-border payments and merchant solutions through our payment infrastructure.' },
+  { icon: Code2, title: 'Technology', body: 'Trading tools, AI systems and Web3 solutions with licensing and subscription revenue.' },
+  { icon: Handshake, title: 'Strategic partnerships', body: 'Collaborations with global brands, institutions and Web3 projects for mutual growth.' },
+  { icon: Share2, title: 'IB partner', body: 'Introducing brokers earn commissions through user referrals and trading volume across our platforms.' },
+];
+
+export function RevenueModel() {
+  return (
+    <section id="revenue" className="scroll-mt-8 py-20 text-[#f2f2ee] sm:py-28" style={{ background: 'var(--color-text)' }}>
+      <div className={container}>
+        <div className="max-w-2xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#b9a2f2]">Our business</p>
+          <h2 className="mt-3" style={{ ...headingStyle, fontSize: 'clamp(1.5rem, 3.5vw, 2.4rem)' }}>
+            Our revenue model.
+          </h2>
+          <p className="mt-4 text-[15px] leading-relaxed opacity-75 sm:text-base">
+            Diverse revenue streams for a stronger, more sustainable future. These are the business areas EliteWhale is building towards; your balance here still moves only
+            with the results actually recorded in the ledger.
+          </p>
+        </div>
+        <ul className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {REVENUE.map((r, i) => (
+            <li key={r.title} className="rounded-3xl bg-white/[0.06] p-7 ring-1 ring-white/10">
+              <div className="flex items-center justify-between">
+                <r.icon size={22} className="text-[#b9a2f2]" aria-hidden />
+                <span className="text-xs font-semibold tabular-nums opacity-40">{String(i + 1).padStart(2, '0')}</span>
+              </div>
+              <h3 className="mt-4 text-lg font-semibold">{r.title}</h3>
+              <p className="mt-2 text-[15px] leading-relaxed opacity-75">{r.body}</p>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  );
+}
+
+/* ---------------------------------------------------------------- support */
+
+export function Support() {
+  return (
+    <section id="support" className={`${container} scroll-mt-8 py-20 sm:py-28`}>
+      <div className={`${card} grid gap-10 p-8 sm:p-12 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]`}>
+        <div>
+          <SectionHeader eyebrow="Support" title="We are here to help." intro="Questions about your account, deposits or withdrawals? Email us, or reach the community on any of our channels." />
+          <a
+            href={`mailto:${SUPPORT_EMAIL}`}
+            className="mt-8 inline-flex max-w-full items-center gap-3 break-all rounded-full px-6 py-3.5 text-sm font-semibold text-white transition hover:brightness-105"
+            style={{ background: 'var(--color-accent)' }}
+          >
+            <Mail size={18} className="shrink-0" aria-hidden />
+            {SUPPORT_EMAIL}
+          </a>
+        </div>
+        <ul className="grid content-center gap-3 sm:grid-cols-2">
+          {SOCIAL_LINKS.map((s) => (
+            <li key={s.label}>
+              <a
+                href={s.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 rounded-2xl bg-black/[0.03] px-5 py-4 text-sm font-medium ring-1 ring-black/5 transition hover:bg-black/[0.06]"
+              >
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: 'rgba(115,66,226,0.1)', color: 'var(--color-accent)' }}>
+                  <s.icon size={18} />
+                </span>
+                {s.label}
+              </a>
             </li>
           ))}
         </ul>
@@ -581,12 +771,13 @@ export function FinalCta({ signedIn, realFunds }: { signedIn: boolean; realFunds
 
 const FOOTER_COLUMNS: { title: string; links: { label: string; href: string }[] }[] = [
   {
-    title: 'Product',
+    title: 'EliteWhale',
     links: [
-      { label: 'How it works', href: '#how-it-works' },
-      { label: 'Valuation', href: '#nav' },
-      { label: 'Withdrawals', href: '#controls' },
-      { label: 'Networks', href: '#networks' },
+      { label: 'About', href: '#about' },
+      { label: 'Roadmap', href: '#roadmap' },
+      { label: 'Upcoming projects', href: '#projects' },
+      { label: 'Revenue model', href: '#revenue' },
+      { label: 'Support', href: '#support' },
     ],
   },
   {
@@ -631,23 +822,6 @@ export function Footer({ realFunds }: { realFunds: boolean }) {
       </div>
       <div className="border-t border-black/10">
         <div className={`${container} space-y-2 py-6 text-xs leading-relaxed opacity-60`}>
-          {realFunds ? (
-            <>
-              <p>
-                Private group software. Not an offer, solicitation or recommendation to invest, and the operator is not licensed to provide investment services. Real USDT is
-                deposited and paid out; you can lose some or all of it.
-              </p>
-              <p>Returns are never guaranteed. Values can fall as well as rise, and past performance does not indicate future results.</p>
-            </>
-          ) : (
-            <>
-              <p>
-                Testnet demonstration software. Not an offer, solicitation or recommendation to invest, and the operator is not licensed to provide investment services. No real
-                funds are accepted, held or paid out.
-              </p>
-              <p>Returns are never guaranteed. Values can fall as well as rise, and simulated performance does not indicate future results.</p>
-            </>
-          )}
           <p>© {new Date().getFullYear()} EliteWhale</p>
         </div>
       </div>

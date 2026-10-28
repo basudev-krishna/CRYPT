@@ -2,7 +2,11 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { webDb } from '@/server/db';
 import { adminUsers } from '@/server/queries/admin';
-import { Badge, Card, EmptyState, Input, PageHeader, Table, Td, Mono } from '@/components/ui/primitives';
+import { Badge, Card, CardHeader, EmptyState, Input, PageHeader, Table, Td, Mono } from '@/components/ui/primitives';
+import { AddMemberForm } from '@/components/admin/add-member-form';
+import { pageStaff } from '@/server/http/auth';
+import { can } from '@/server/permissions';
+import { maybeOne } from '@/server/db-core';
 import { Money } from '@/components/ui/money';
 import { KycStatus } from '@/components/ui/status';
 import { dateTime } from '@/lib/format';
@@ -11,10 +15,24 @@ export const metadata: Metadata = { title: 'Users' };
 
 export default async function AdminUsersPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const { q } = await searchParams;
-  const users = await adminUsers(webDb(), q?.trim().slice(0, 100) || null);
+  const staff = await pageStaff();
+  const db = webDb();
+  const [users, me] = await Promise.all([
+    adminUsers(db, q?.trim().slice(0, 100) || null),
+    maybeOne<{ member_code: string }>(db, 'select member_code from public.user_profiles where user_id = $1', [staff.id]),
+  ]);
   return (
     <>
       <PageHeader title="Users" />
+      {can(staff.roles, 'network.manage') ? (
+        <Card className="mb-6">
+          <CardHeader
+            title="Add a member"
+            subtitle="Create an account directly, with its sponsor and team position. Any position can be used; the member who holds it moves down under the new one."
+          />
+          <AddMemberForm defaultSponsor={me?.member_code ?? ''} />
+        </Card>
+      ) : null}
       <Card>
         <form className="mb-4 max-w-md">
           <label htmlFor="q" className="sr-only">Search users</label>
