@@ -7,10 +7,11 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { admin, balanceOf, closePools, createUser, resetAppData, simAdapter, simDeposit, simToken, usdt, web, worker } from '../helpers/db';
 import { one, withTransaction } from '../../src/server/db-core';
 import { checkIntegrity } from '../../src/server/ledger/ledger';
+import { adminManualAdditions } from '../../src/server/queries/admin';
 import { SimulatedChainAdapter } from '../../src/server/chains/simulated';
 import { creditDeposit, ingestNetwork, refreshDeposit } from '../../src/server/deposits/service';
 import { createAllocation, postAllocation } from '../../src/server/deposits/allocations';
-import { createHolder, linkHolder, memberHolding, offchainBalance, recordEntry, recordMoveToPlatform, reverseEntry, type ManualKind } from '../../src/server/offchain/holdings';
+import { createHolder, holderOfUser, listEntries, setBalance, linkHolder, memberHolding, startHolderForUser, offchainBalance, recordEntry, recordMoveToPlatform, reverseEntry, type ManualKind } from '../../src/server/offchain/holdings';
 
 const GROUP = '0x0000000000000000000000000000000000000a07';
 let adminId: string;
@@ -131,6 +132,58 @@ describe('off-platform ledger', () => {
     await expect(
       withTransaction(web, (db) => recordMoveToPlatform(db, { holderId: h.id, allocationId: foreign, reason: 'Wrong person entirely', idempotencyKey: `move:${foreign}`, staffUserId: adminId, actor: actor() })),
     ).rejects.toMatchObject({ code: 'invalid_allocation' });
+  });
+
+  it('opens a linked record from the user page once, even when repeated', async () => {
+    const friend = await createUser();
+    const start = () => withTransaction(web, (db) => startHolderForUser(db, { userId: friend, staffUserId: adminId, actor: actor() }));
+    const first = await start();
+    expect(await start()).toEqual(first);
+    expect(await holderOfUser(admin, friend)).toMatchObject({ id: first.id, user_id: friend });
+    expect((await admin.query('select count(*)::int as n from public.offchain_holders')).rows[0].n).toBe(1);
+    await entry(first.id, 'earnings', '40');
+    expect(await memberHolding(web, friend)).toMatchObject({ balance: micro('40') });
+  });
+
+  it('sets a new total by recording the difference once, and refuses a stale edit', async () => {
+    const h = await holder();
+    await entry(h.id, 'contribution', '100');
+    const set = (target: string, expected: string, key = randomUUID()) =>
+      withTransaction(web, (db) => setBalance(db, { holderId: h.id, target, expected, occurredOn: '2026-10-29', reason: 'Balance agreed in person', idempotencyKey: key, staffUserId: adminId, actor: actor() }));
+    const key = randomUUID();
+    const first = await set('250.5', '100', key);
+    expect((await set('250.5', '100', key)).id).toBe(first.id); // a retry records nothing new
+    expect(await balance(h.id)).toBe(micro('250.5'));
+    await expect(set('300', '100')).rejects.toMatchObject({ code: 'balance_changed' });
+    await expect(set('250.5', '250.5')).rejects.toMatchObject({ code: 'no_change' });
+    await set('40', '250.5');
+    expect(await balance(h.id)).toBe(micro('40'));
+    expect((await admin.query("select count(*)::int as n from public.offchain_entries where kind = 'adjustment'")).rows[0].n).toBe(2);
+  });
+
+  it('lists hand-made entries for linked members on the admin deposits page, signed', async () => {
+    const friend = await createUser();
+    const h = await withTransaction(web, (db) => startHolderForUser(db, { userId: friend, staffUserId: adminId, actor: actor() }));
+    await entry(h.id, 'earnings', '30');
+    await entry(h.id, 'payback', '10');
+    const rows = await adminManualAdditions(web);
+    expect(rows.map((r) => [r.user_id, r.kind, r.amount])).toEqual([
+      [friend, 'payback', '-10000000'],
+      [friend, 'earnings', '30000000'],
+    ]);
+  });
+
+  it('tags a matching bonus so the member and the admin list see it as one', async () => {
+    const friend = await createUser();
+    const h = await withTransaction(web, (db) => startHolderForUser(db, { userId: friend, staffUserId: adminId, actor: actor() }));
+    const add = (kind: ManualKind) =>
+      withTransaction(web, (db) =>
+        recordEntry(db, { holderId: h.id, kind, category: 'matching_bonus', amount: '12', occurredOn: '2026-10-29', reason: 'Matching bonus for October', idempotencyKey: randomUUID(), staffUserId: adminId, actor: actor() }),
+      );
+    await add('earnings');
+    await expect(add('contribution')).rejects.toMatchObject({ code: 'invalid_category' });
+    expect((await listEntries(web, h.id)).map((e) => e.category)).toEqual(['matching_bonus']);
+    expect((await adminManualAdditions(web))[0]).toMatchObject({ kind: 'matching_bonus', amount: '12000000' });
   });
 
   it('is invisible to other members through the public API role', async () => {

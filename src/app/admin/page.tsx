@@ -68,7 +68,7 @@ export default async function AdminOverviewPage() {
           </Link>
         </StaggerItem>
         <StaggerItem>
-          <Stat icon={Users} label="Members" value={o.users} sub={<Link className="text-accent hover:underline" href="/admin/compliance">{o.kycPending} KYC pending review</Link>} />
+          <Stat icon={Users} label="Members" value={o.users} />
         </StaggerItem>
         <StaggerItem>
           <Stat icon={ArrowDownToLine} label="Credited deposits" value={o.depositsCredited} sub={<><Money value={o.depositsCreditedSum} decimals={DEC} /> · {o.depositsOpen} open</>} />

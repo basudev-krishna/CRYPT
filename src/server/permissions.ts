@@ -16,6 +16,7 @@ export const PERMISSIONS = {
   'deposit.allocate': ['admin'], // assign, distribute or correct group-wallet receipts
   'user.restrict': ['admin', 'compliance'],
   'user.approve': ['admin'], // new sign-ups wait for an administrator
+  'member.edit': ['admin'], // correct a member's name, username, phone and country (audited)
   'member.invite': ['admin'], // membership is admin-controlled; also covers revoking
   'referral.review': ['admin'], // approve or reject a referral reward (operator money)
   'referral.configure': ['admin'], // referral reward amount, program start and tiers

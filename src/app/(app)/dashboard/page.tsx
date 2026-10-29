@@ -12,7 +12,8 @@ import { AllocationDonut, ValueChart } from '@/components/charts/value-chart';
 import { Reveal, Stagger, StaggerItem } from '@/components/ui/motion';
 import { baseToChart, dateTime } from '@/lib/format';
 import { serverEnv } from '@/server/env';
-import { MICRO_DECIMALS, memberHolding } from '@/server/offchain/holdings';
+import { memberHolding, microToBase } from '@/server/offchain/holdings';
+import { heldLabel } from '@/components/ui/offchain';
 
 export const metadata: Metadata = { title: 'Overview' };
 
@@ -39,6 +40,30 @@ export default async function DashboardPage() {
   ]);
   const dec = d.token?.decimals ?? 6;
   const sym = d.token?.symbol ?? 'USDT';
+  // Money the administrator holds for them counts in their total, not in what they can withdraw.
+  const held = offPlatform && offPlatform.balance > 0n ? microToBase(offPlatform.balance, dec) : 0n;
+  const total = d.totalAccountValue + held;
+  // Recent activity: ledger entries plus what the administrator recorded for them, newest first.
+  const recent = [
+    ...activity.map((a) => ({
+      key: `l:${a.entryId}`,
+      at: new Date(a.postedAt),
+      label: EVENT_LABELS[a.eventType] ?? a.eventType,
+      cash: a.cashDelta,
+      pending: a.pendingDelta,
+      reserved: a.reservedDelta,
+    })),
+    ...(offPlatform?.entries ?? []).map((e) => ({
+      key: `h:${e.id}`,
+      at: new Date(e.createdAt),
+      label: heldLabel(e),
+      cash: microToBase(e.amountMicro, dec),
+      pending: 0n,
+      reserved: 0n,
+    })),
+  ]
+    .sort((x, y) => y.at.getTime() - x.at.getTime())
+    .slice(0, 8);
   // Group mode: no investment pool, so only balances and activity are shown.
   const group = serverEnv().GROUP_MODE;
   const quickActions = group ? QUICK_ACTIONS.filter((q) => q.href !== '/portfolio') : QUICK_ACTIONS;
@@ -49,6 +74,7 @@ export default async function DashboardPage() {
     { key: 'invested', label: 'Invested (est.)', amount: d.investmentValue },
     { key: 'pending', label: 'Pending investment', amount: d.pendingSubscription },
     { key: 'reserved', label: 'Reserved for withdrawals', amount: d.reserved },
+    { key: 'held', label: 'Recorded by the administrator', amount: held },
   ].map((s) => ({ key: s.key, label: s.label, value: baseToChart(s.amount, dec), display: `${fmt(s.amount, dec)} ${sym}` }));
 
   return (
@@ -81,21 +107,10 @@ export default async function DashboardPage() {
         </div>
       ) : null}
 
-      {offPlatform ? (
-        <div className="mb-6">
-          <Notice tone="info" title="Held off-platform">
-            The administrator holds <Money value={offPlatform.balance} decimals={MICRO_DECIMALS} symbol="USDT" /> for you outside the group wallet. It is not
-            part of your available balance.{' '}
-            <Link className="text-accent hover:underline" href="/off-platform">
-              View history
-            </Link>
-          </Notice>
-        </div>
-      ) : null}
 
       <Stagger className={`grid gap-4 sm:grid-cols-2 ${group ? '' : 'xl:grid-cols-4'}`}>
         <StaggerItem>
-          <Stat emphasis icon={Wallet} label="Total account value" value={<Money value={d.totalAccountValue} decimals={dec} symbol={sym} className="[&>span]:text-white/70" />} badge={d.isSimulated ? <SimulatedBadge /> : null} sub={group ? 'Available + reserved for withdrawals' : 'Available + reserved + pending + investments'} />
+          <Stat emphasis icon={Wallet} label="Total account value" value={<Money value={total} decimals={dec} symbol={sym} className="[&>span]:text-white/70" />} badge={d.isSimulated ? <SimulatedBadge /> : null} sub={`${group ? 'Available + reserved for withdrawals' : 'Available + reserved + pending + investments'}`} />
         </StaggerItem>
         <StaggerItem>
           <Stat icon={PiggyBank} label="Available to withdraw" value={<Money value={d.available} decimals={dec} symbol={sym} />} sub={<>Reserved: <Money value={d.reserved} decimals={dec} /></>} />
@@ -152,7 +167,7 @@ export default async function DashboardPage() {
         <Reveal delay={0.08}>
           <Card className="h-full">
             <CardHeader title="Where your money is" subtitle="Hover a slice or row to see its share" />
-            <AllocationDonut slices={slices} centerLabel="Total" centerValue={`${fmt(d.totalAccountValue, dec)} ${sym}`} />
+            <AllocationDonut slices={slices} centerLabel="Total" centerValue={`${fmt(total, dec)} ${sym}`} />
           </Card>
         </Reveal>
       </div>
@@ -162,25 +177,25 @@ export default async function DashboardPage() {
         <Reveal>
           <Card className="h-full">
             <CardHeader title="Recent activity" action={<Link href="/transactions" className="text-xs font-medium text-accent hover:underline">All transactions →</Link>} />
-            {activity.length ? (
+            {recent.length ? (
               <ol className="relative space-y-1 before:absolute before:bottom-3 before:left-[19px] before:top-3 before:w-px before:bg-line">
-                {activity.map((a) => {
-                  const incoming = a.cashDelta > 0n;
-                  const outgoing = a.cashDelta < 0n;
+                {recent.map((a) => {
+                  const incoming = a.cash > 0n;
+                  const outgoing = a.cash < 0n;
                   const Icon = incoming ? ArrowDownLeft : outgoing ? ArrowUpRight : ArrowLeftRight;
                   return (
-                    <li key={a.entryId} className="relative flex items-center gap-3 rounded-xl px-1 py-2 transition-colors hover:bg-surface-3/60">
+                    <li key={a.key} className="relative flex items-center gap-3 rounded-xl px-1 py-2 transition-colors hover:bg-surface-3/60">
                       <span className={`relative grid h-10 w-10 shrink-0 place-items-center rounded-full ring-4 ring-white ${incoming ? 'bg-gain/10 text-gain' : outgoing ? 'bg-loss/10 text-loss' : 'bg-accent/10 text-accent'}`}>
                         <Icon size={16} aria-hidden />
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{EVENT_LABELS[a.eventType] ?? a.eventType}</p>
-                        <p className="text-xs text-fg-subtle">{dateTime(a.postedAt)}</p>
+                        <p className="truncate text-sm font-medium">{a.label}</p>
+                        <p className="text-xs text-fg-subtle">{dateTime(a.at)}</p>
                       </div>
                       <div className="text-right text-xs">
-                        {a.cashDelta !== 0n ? <div className="text-sm"><Money value={a.cashDelta} decimals={dec} signed colored /></div> : null}
-                        {a.pendingDelta !== 0n ? <div className="text-fg-muted">Pending <Money value={a.pendingDelta} decimals={dec} signed /></div> : null}
-                        {a.reservedDelta !== 0n ? <div className="text-fg-muted">Reserved <Money value={a.reservedDelta} decimals={dec} signed /></div> : null}
+                        {a.cash !== 0n ? <div className="text-sm"><Money value={a.cash} decimals={dec} signed colored /></div> : null}
+                        {a.pending !== 0n ? <div className="text-fg-muted">Pending <Money value={a.pending} decimals={dec} signed /></div> : null}
+                        {a.reserved !== 0n ? <div className="text-fg-muted">Reserved <Money value={a.reserved} decimals={dec} signed /></div> : null}
                       </div>
                     </li>
                   );

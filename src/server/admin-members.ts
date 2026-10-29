@@ -14,7 +14,7 @@
 import 'server-only';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { maybeOne, type Db } from './db-core';
+import { maybeOne, one, pgErrorCode, type Db } from './db-core';
 import { serverEnv } from './env';
 import { recordAudit, type Actor } from './ops';
 import { setPlacement } from './referrals/network';
@@ -98,4 +98,51 @@ export async function placeAdminMember(db: Db, args: { userId: string; input: Ad
     side: input.teamSide,
   });
   return { memberCode: p?.member_code ?? '' };
+}
+
+const blankToNull = (v: unknown) => (typeof v === 'string' && v.trim() === '' ? null : v);
+/** Username, phone and country may be blank: members who joined before those fields existed have none. */
+export const memberDetailsSchema = registerSchema.pick({ fullName: true }).extend({
+  username: z.preprocess(blankToNull, registerSchema.shape.username.nullable()),
+  phone: z.preprocess(blankToNull, registerSchema.shape.phone.nullable()),
+  countryCode: z.preprocess(blankToNull, registerSchema.shape.countryCode.nullable()),
+});
+export type MemberDetails = z.infer<typeof memberDetailsSchema>;
+
+/**
+ * Correct a member's details, e.g. a typo in a login the administrator created.
+ * The username is the sign-in alias, so a change takes effect at their next
+ * sign-in. Email, member id and sponsor are not editable here.
+ */
+export async function updateMemberDetails(db: Db, args: { userId: string; details: MemberDetails; actor: Actor }): Promise<void> {
+  const d = args.details;
+  const before = await maybeOne<{ display_name: string | null; username: string | null; phone: string | null; country_code: string | null }>(
+    db,
+    'select display_name, username, phone, country_code from public.user_profiles where user_id = $1 for update',
+    [args.userId],
+  );
+  if (!before) throw new AdminMemberError('No member has that id', 'member_not_found');
+  // Write only what changed: username and phone need their own column grant.
+  const after = { display_name: d.fullName, username: d.username, phone: d.phone, country_code: d.countryCode };
+  const changed = (Object.keys(after) as (keyof typeof after)[]).filter((k) => after[k] !== before[k]);
+  if (!changed.length) return;
+  if (before.username && !d.username) throw new AdminMemberError('A username cannot be removed, only changed.', 'username_required');
+  if (changed.includes('username') && (await maybeOne(db, 'select 1 from public.user_profiles where username = $1', [d.username]))) {
+    throw new AdminMemberError('That username is taken. Choose another.', 'username_taken');
+  }
+  try {
+    await one(
+      db,
+      `update public.user_profiles set ${changed.map((k, i) => `${k} = $${i + 2}`).join(', ')} where user_id = $1 returning user_id`,
+      [args.userId, ...changed.map((k) => after[k])],
+    );
+  } catch (err) {
+    if (pgErrorCode(err) === '23505') throw new AdminMemberError('That username is taken. Choose another.', 'username_taken');
+    if (pgErrorCode(err) === '42501') throw new AdminMemberError('Username and phone can be changed once the latest database migration is applied.', 'migration_pending');
+    throw err;
+  }
+  await recordAudit(db, args.actor, 'member.details_updated', { type: 'user', id: args.userId }, {
+    before,
+    after: Object.fromEntries(changed.map((k) => [k, after[k]])),
+  });
 }

@@ -14,12 +14,15 @@ import { pageStaff } from '@/server/http/auth';
 import { can, type StaffRole } from '@/server/permissions';
 import { STAFF_ROLES } from '@/server/staff';
 import { listAdjustments, operatorFloats } from '@/server/adjustments/manual';
-import { AdjustmentForm } from '@/components/admin/adjustment-form';
+import { BalanceEditor, ManualDepositForm, RewardForm } from '@/components/admin/adjustment-form';
 import { getMembership } from '@/server/queries/user';
 import { networkHistory, placementOf, teamTree } from '@/server/referrals/network';
 import { effectiveProgram, rankCorrections, rankHistory } from '@/server/referrals/program';
 import { PlacementForm, SponsorForm } from '@/components/admin/network-forms';
 import { TeamTree } from '@/components/app/team-tree';
+import { MemberDetailsForm } from '@/components/admin/member-details-form';
+import { holderOfUser, MICRO_DECIMALS, offchainBalance } from '@/server/offchain/holdings';
+import { OffchainSection } from '@/components/admin/offchain-section';
 
 export const metadata: Metadata = { title: 'User detail' };
 
@@ -30,7 +33,7 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
   const detail = await adminUserDetail(db, id);
   if (!detail) notFound();
   const staff = await pageStaff();
-  const [activity, deposits, withdrawals, adjustments, floats, bonusFunds, membership, placement, tree, history, { params: program }, ranksHeld, corrections] = await Promise.all([
+  const [activity, deposits, withdrawals, adjustments, floats, bonusFunds, membership, placement, tree, history, { params: program }, ranksHeld, corrections, holder] = await Promise.all([
     listActivity(db, id, 30),
     listDeposits(db, id, 20),
     listWithdrawals(db, id, 20),
@@ -44,7 +47,9 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
     effectiveProgram(db),
     rankHistory(db, id),
     rankCorrections(db, id),
+    holderOfUser(db, id),
   ]);
+  const heldBalance = holder ? await offchainBalance(db, holder.id) : 0n;
   const heldRanks = new Map(ranksHeld.map((r) => [r.rank_code, r]));
   const balanceRows = detail.balances as { token_id: number }[];
   const incomes = new Map(await Promise.all(balanceRows.map(async (b) => [Number(b.token_id), await getRewardIncome(db, id, Number(b.token_id))] as const)));
@@ -52,14 +57,78 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
   const canManageStaff = can(staff.roles, 'staff.manage');
   const canAdjust = can(staff.roles, 'balance.adjust');
   const canNetwork = can(staff.roles, 'network.manage');
+  const canOffchain = can(staff.roles, 'offchain.record');
   const fundOptions = [
     ...floats.map((f) => ({ fund: 'operator_float' as const, f })),
     ...bonusFunds.map((f) => ({ fund: 'referral_reward_fund' as const, f })),
   ].map(({ fund, f }) => ({ fund, tokenId: Number(f.token_id), symbol: f.symbol, balance: formatUnits(BigInt(f.balance), Number(f.decimals)) }));
-  const p = detail.profile as { email: string; account_status: string; restriction_reason: string | null };
+  const p = detail.profile as {
+    email: string;
+    account_status: string;
+    restriction_reason: string | null;
+    display_name: string | null;
+    username: string | null;
+    phone: string | null;
+    country_code: string | null;
+    member_code: string;
+  };
+  const canEdit = can(staff.roles, 'member.edit');
   return (
     <>
-      <PageHeader title={p.email} description={`User ${id}`} />
+      <PageHeader title={p.display_name || p.email} description={`${p.member_code} · ${p.username ? `@${p.username} · ` : ''}${p.email}`} />
+      <div className="mb-6 grid gap-6 xl:grid-cols-2">
+        <Card>
+          <CardHeader
+            title="Edit member"
+            subtitle="Name, sign-in username, phone and country. Email, member id and sponsor are changed elsewhere (sponsor below). They change their own password under Security, or reset it with Forgot password."
+          />
+          {canEdit ? (
+            <MemberDetailsForm
+              userId={id}
+              initial={{ fullName: p.display_name ?? '', username: p.username ?? '', phone: p.phone ?? '', countryCode: p.country_code ?? '' }}
+            />
+          ) : (
+            <p className="text-sm text-fg-muted">Only administrators can edit members.</p>
+          )}
+        </Card>
+        <Card>
+          <CardHeader
+            title="Balance and rewards"
+            subtitle="The total is what you hold for this member: it counts in their total account value but is not withdrawable. Deposits and rewards go straight to their available balance when your operator float or reward fund covers them; otherwise they are added to this total. Fix a mistake with Reverse below."
+          />
+          {canOffchain ? (
+            <BalanceEditor
+              userId={id}
+              balance={formatUnits(heldBalance, MICRO_DECIMALS)}
+              display={<Money value={heldBalance} decimals={MICRO_DECIMALS} symbol="USDT" />}
+            />
+          ) : (
+            <p className="text-2xl font-semibold"><Money value={heldBalance} decimals={MICRO_DECIMALS} symbol="USDT" /></p>
+          )}
+          {canOffchain ? (
+            <div className="mt-5 border-t border-line pt-4">
+              <h3 className="mb-1 text-sm font-medium">Add deposit</h3>
+              <p className="mb-3 text-xs text-fg-muted">Money they paid you personally. Shown in their deposit history.</p>
+              <ManualDepositForm userId={id} floats={canAdjust ? fundOptions : []} />
+            </div>
+          ) : null}
+          <div className="mt-5 border-t border-line pt-4">
+            <h3 className="mb-3 text-sm font-medium">Add reward / interest</h3>
+            {canAdjust || canOffchain ? (
+              <RewardForm userId={id} floats={canAdjust ? fundOptions : []} canPersonal={canOffchain} />
+            ) : (
+              <p className="text-sm text-fg-muted">Only administrators can add rewards.</p>
+            )}
+          </div>
+          {canOffchain ? (
+            <div className="mt-5 border-t border-line pt-4">
+              <h3 className="mb-1 text-sm font-medium">Add matching bonus</h3>
+              <p className="mb-3 text-xs text-fg-muted">Added to the balance above and listed on the member&apos;s Matching bonus tab.</p>
+              <RewardForm userId={id} floats={[]} canPersonal category="matching_bonus" />
+            </div>
+          ) : null}
+        </Card>
+      </div>
       <div className="grid gap-6 xl:grid-cols-3">
         <Card>
           <CardHeader title="Account status" action={<Badge tone={p.account_status === 'active' ? 'success' : p.account_status === 'pending_approval' ? 'warn' : 'danger'}>{p.account_status.replace('_', ' ')}</Badge>} />
@@ -113,14 +182,7 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
           <JsonBlock value={detail.positions} />
         </Card>
       </div>
-      <div className="mt-6 grid gap-6 xl:grid-cols-2">
-        <Card>
-          <CardHeader
-            title="Adjust balance or income"
-            subtitle="Balance: money settled with you personally, against your operator float. Income: award a bonus from the referral fund, or take back income paid by mistake into it. Every change is a ledger entry; fix a mistake with Reverse."
-          />
-          {canAdjust ? <AdjustmentForm userId={id} floats={fundOptions} /> : <p className="text-sm text-fg-muted">Only administrators can adjust balances.</p>}
-        </Card>
+      <div className="mt-6">
         <Card>
           <CardHeader title={`Adjustments (${adjustments.length})`} />
           <Table head={['When', 'Change', 'Reason', 'Status', canAdjust ? 'Fix' : '']}>
@@ -129,7 +191,7 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
                 <Td className="text-fg-muted">{dateTime(a.created_at)}</Td>
                 <Td><Money value={a.direction === 'credit' ? a.amount_base : `-${a.amount_base}`} decimals={Number(a.decimals)} symbol={a.symbol} signed colored /></Td>
                 <Td className="max-w-xs">
-                  {a.fund === 'referral_reward_fund' ? <span className="block text-xs text-fg-muted">{a.direction === 'credit' ? 'Income (referral fund)' : a.reverses_adjustment_id ? 'Income reversal' : 'Income correction'}</span> : null}
+                  {a.fund === 'referral_reward_fund' ? <span className="block text-xs text-fg-muted">{a.direction === 'credit' ? 'Reward / prize' : a.reverses_adjustment_id ? 'Reward reversal' : 'Reward taken back'}</span> : null}
                   {a.reason}
                   {a.error ? <span className="block text-xs text-loss">{a.error}</span> : null}
                 </Td>
@@ -143,6 +205,11 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
           </Table>
         </Card>
       </div>
+      {holder ? (
+        <div className="mt-6">
+          <OffchainSection db={db} holder={holder} canRecord={canOffchain} showEntryForm={false} />
+        </div>
+      ) : null}
       <div className="mt-6 grid gap-6 xl:grid-cols-2">
         <Card>
           <CardHeader
@@ -230,11 +297,7 @@ export default async function AdminUserPage({ params }: { params: Promise<{ id: 
           </div>
         ) : null}
       </Card>
-      <div className="mt-6 grid gap-6 xl:grid-cols-2">
-        <Card>
-          <CardHeader title="KYC history" />
-          <JsonBlock value={detail.kyc} />
-        </Card>
+      <div className="mt-6">
         <Card>
           <CardHeader title="Risk events" />
           <Table head={['When', 'Kind', 'Severity', 'Status']}>

@@ -43,7 +43,7 @@ export default async function OffPlatformMemberPage() {
           {holding.entries.map((e) => (
             <tr key={e.id}>
               <Td className="text-fg-muted">{e.occurredOn}</Td>
-              <Td><OffchainKind kind={e.kind} /></Td>
+              <Td><OffchainKind kind={e.kind} category={e.category} /></Td>
               <Td><Money value={e.amountMicro} decimals={MICRO_DECIMALS} signed colored /></Td>
               <Td className="max-w-md">
                 {e.reason}

@@ -25,37 +25,6 @@ function useSubmit() {
   return { busy, run, notice };
 }
 
-export function CreateHolderForm() {
-  const [name, setName] = useState('');
-  const [note, setNote] = useState('');
-  const { busy, run, notice } = useSubmit();
-  return (
-    <div className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Name" htmlFor="holder-name">
-          <Input id="holder-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
-        </Field>
-        <Field label="Private note (optional)" htmlFor="holder-note" hint="Only staff see this.">
-          <Input id="holder-note" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} />
-        </Field>
-      </div>
-      <Button
-        className="h-8 px-3 text-xs"
-        disabled={busy || name.trim().length < 2}
-        onClick={async () => {
-          if (await run('/api/admin/offchain/holders', { name, note: note || null }, 'Added.')) {
-            setName('');
-            setNote('');
-          }
-        }}
-      >
-        {busy ? '…' : 'Add person'}
-      </Button>
-      {notice}
-    </div>
-  );
-}
-
 export function EditHolderForm({ holderId, name: initialName, note: initialNote }: { holderId: string; name: string; note: string | null }) {
   const [name, setName] = useState(initialName);
   const [note, setNote] = useState(initialNote ?? '');
@@ -198,3 +167,4 @@ export function MoveToPlatformForm({ holderId, assignments }: { holderId: string
     </div>
   );
 }
+

@@ -1,28 +1,64 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { webDb } from '@/server/db';
-import { adminActiveMembers, adminDeposits } from '@/server/queries/admin';
+import { adminActiveMembers, adminDeposits, adminManualAdditions } from '@/server/queries/admin';
 import { listNetworks } from '@/server/chains/registry';
-import { Card, CardHeader, EmptyState, Mono, PageHeader, SimulatedBadge, Table, Td, shortHash } from '@/components/ui/primitives';
+import { Badge, Card, CardHeader, EmptyState, Mono, PageHeader, SimulatedBadge, Table, Td, shortHash } from '@/components/ui/primitives';
 import { Money } from '@/components/ui/money';
 import { DepositStatus } from '@/components/ui/status';
 import { NoteAction } from '@/components/app/actions';
 import { InvestigateForm } from '@/components/admin/investigate-form';
 import { AllocationForm } from '@/components/admin/group-forms';
 import { JsonBlock } from '@/components/admin/json';
+import { ManualDepositForm } from '@/components/admin/adjustment-form';
+import { pageStaff } from '@/server/http/auth';
+import { operatorFloats } from '@/server/adjustments/manual';
+import { formatUnits } from '@/lib/money';
+import { can } from '@/server/permissions';
 import { dateTime } from '@/lib/format';
 
 export const metadata: Metadata = { title: 'Deposits' };
 const FILTERS = ['under_review', 'recovery_required', 'confirming', 'credited', 'failed'];
+const KIND_LABELS: Record<string, string> = {
+  adjustment: 'Balance edit',
+  earnings: 'Reward / interest',
+  matching_bonus: 'Matching bonus',
+  contribution: 'Deposit (paid to you)',
+  payback: 'Paid back',
+  reversal: 'Reversal',
+  balance: 'Balance (withdrawable)',
+  reward: 'Reward (withdrawable)',
+};
 
 export default async function AdminDepositsPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
   const { status } = await searchParams;
   const db = webDb();
-  const [rows, networks, activeMembers] = await Promise.all([adminDeposits(db, status && FILTERS.includes(status) ? status : null), listNetworks(db), adminActiveMembers(db)]);
+  const staff = await pageStaff();
+  const [rows, networks, activeMembers, additions] = await Promise.all([
+    adminDeposits(db, status && FILTERS.includes(status) ? status : null),
+    listNetworks(db),
+    adminActiveMembers(db),
+    adminManualAdditions(db),
+  ]);
+  const floats = (await operatorFloats(db)).map((f) => ({
+    fund: 'operator_float' as const,
+    tokenId: Number(f.token_id),
+    symbol: f.symbol,
+    balance: formatUnits(BigInt(f.balance), Number(f.decimals)),
+  }));
   const members = activeMembers.map((m) => ({ userId: m.user_id, label: `${m.member_code} · ${m.display_name ?? m.username ?? m.email ?? ''}` }));
   return (
     <>
       <PageHeader title="Deposits" description="Monitor incoming transfers, assign or distribute unattributed group-wallet receipts, reverse wrong credits, and investigate missing transfers." />
+      {can(staff.roles, 'offchain.record') ? (
+        <Card className="mb-6">
+          <CardHeader
+            title="Add a deposit"
+            subtitle="For money a member paid you personally (cash, bank, another wallet). With a funded operator float it goes straight to their available balance; otherwise it is kept as held by you. It shows in their deposit history and under Balance added by admin below. Transfers to the group wallet appear in the table and are assigned there."
+          />
+          <ManualDepositForm members={members} floats={can(staff.roles, 'balance.adjust') ? floats : []} />
+        </Card>
+      ) : null}
       <Card className="mb-6">
         <CardHeader title="Investigate a reported transaction" subtitle="Looks up the receipt on chain and records any transfer to a platform deposit address." />
         <InvestigateForm networks={networks.map((n) => ({ id: n.id, name: n.name }))} />
@@ -59,6 +95,31 @@ export default async function AdminDepositsPage({ searchParams }: { searchParams
                   )
                 ) : null}
               </Td>
+            </tr>
+          ))}
+        </Table>
+      </Card>
+      <Card className="mt-6">
+        <CardHeader
+          title={`Balance added by admin (${additions.length})`}
+          subtitle="Balances, rewards and corrections entered by hand, newest first. Held with you: in the member's record, not withdrawable. Withdrawable: paid from your operator float or reward fund."
+        />
+        <Table head={['When', 'Member', 'Type', 'Amount', 'Reason', 'Status', 'By']} empty={additions.length ? null : <EmptyState title="Nothing added by hand yet" />}>
+          {additions.map((a) => (
+            <tr key={`${a.source}:${a.id}`}>
+              <Td className="whitespace-nowrap text-fg-muted">{dateTime(a.created_at)}</Td>
+              <Td className="text-xs">
+                <Link className="text-accent hover:underline" href={`/admin/users/${a.user_id}`}>{a.display_name || a.email}</Link>
+                {a.member_code ? <span className="block text-fg-subtle">{a.member_code}</span> : null}
+              </Td>
+              <Td>
+                {KIND_LABELS[a.kind] ?? a.kind}
+                <span className="block text-xs text-fg-subtle">{a.source === 'held' ? 'Held with you' : 'Withdrawable'}</span>
+              </Td>
+              <Td><Money value={a.amount} decimals={Number(a.decimals)} symbol={a.symbol} signed colored /></Td>
+              <Td className="max-w-xs text-xs">{a.reason}</Td>
+              <Td><Badge tone={a.status === 'saved' || a.status === 'posted' ? 'success' : a.status === 'pending' ? 'warn' : 'neutral'}>{a.status}</Badge></Td>
+              <Td className="text-xs text-fg-muted">{a.created_by_email ?? '—'}</Td>
             </tr>
           ))}
         </Table>

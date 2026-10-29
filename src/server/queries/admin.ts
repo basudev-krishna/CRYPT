@@ -456,3 +456,51 @@ export async function referralPolicyHistory(db: Db) {
     "select version, params, change_note, created_by, created_at from public.policy_versions where kind = 'referral' order by version desc limit 20",
   );
 }
+
+export interface ManualAddition {
+  source: 'held' | 'platform';
+  id: string;
+  user_id: string;
+  email: string | null;
+  member_code: string | null;
+  display_name: string | null;
+  kind: string;
+  /** Signed: negative for subtractions. */
+  amount: string;
+  decimals: number;
+  symbol: string;
+  reason: string;
+  status: string;
+  created_at: Date;
+  created_by_email: string | null;
+}
+
+/**
+ * Balance changes the administrator made by hand, newest first: entries in
+ * members' records held with the administrator (balance edits, rewards,
+ * reversals) and platform adjustments against the operator float or reward fund.
+ */
+export async function adminManualAdditions(db: Db, limit = 100) {
+  return many<ManualAddition>(
+    db,
+    `select * from (
+       select 'held' as source, e.id::text, h.user_id, p.email, p.member_code, p.display_name,
+              case when to_jsonb(e) ->> 'category' = 'matching_bonus' then 'matching_bonus' else e.kind::text end as kind,
+              e.amount_micro::text as amount, 6 as decimals, 'USDT' as symbol, e.reason, 'saved' as status, e.created_at, s.email as created_by_email
+         from public.offchain_entries e
+         join public.offchain_holders h on h.id = e.holder_id
+         join public.user_profiles p on p.user_id = h.user_id
+         left join public.user_profiles s on s.user_id = e.created_by
+        where e.kind <> 'moved_to_platform'
+       union all
+       select 'platform', m.id::text, m.user_id, p.email, p.member_code, p.display_name,
+              case when m.fund = 'referral_reward_fund' then 'reward' else 'balance' end,
+              (case when m.direction = 'debit' then -m.amount_base else m.amount_base end)::text, t.decimals, t.symbol, m.reason, m.status::text, m.created_at, s.email
+         from public.manual_adjustments m
+         join public.supported_tokens t on t.id = m.token_id
+         join public.user_profiles p on p.user_id = m.user_id
+         left join public.user_profiles s on s.user_id = m.created_by
+     ) x order by created_at desc limit $1`,
+    [limit],
+  );
+}

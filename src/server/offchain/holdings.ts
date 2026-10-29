@@ -32,6 +32,8 @@ const MIN_REASON = 10;
 
 export type ManualKind = 'contribution' | 'earnings' | 'payback' | 'adjustment';
 export type EntryKind = ManualKind | 'moved_to_platform' | 'reversal';
+/** Optional tag on an earnings entry, so the member sees it in the right place. */
+export type EntryCategory = 'matching_bonus';
 
 /**
  * Signed micro amount for a manual entry. Contributions and earnings add,
@@ -46,6 +48,11 @@ export function signedMicro(kind: ManualKind, amount: string): bigint {
   if (kind === 'payback') return -value;
   if (kind === 'adjustment' && negative) return -value;
   return value;
+}
+
+/** Micro-USDT → token base units (for adding a held balance to a token-denominated total). */
+export function microToBase(micro: bigint, decimals: number): bigint {
+  return decimals >= MICRO_DECIMALS ? micro * 10n ** BigInt(decimals - MICRO_DECIMALS) : micro / 10n ** BigInt(MICRO_DECIMALS - decimals);
 }
 
 /** Token base units → micro-USDT, refusing any amount that would lose precision. */
@@ -117,6 +124,25 @@ export async function linkHolder(db: Db, args: { holderId: string; memberCode: s
   await notify(db, { userId: member.user_id, kind: 'offchain_linked', payload: { holderId: h.id }, dedupeKey: `offchain_linked:${h.id}` });
 }
 
+/**
+ * Open the off-platform record for an existing member, from their user page:
+ * a holder named after them, linked to the account in the same transaction.
+ */
+export async function startHolderForUser(db: Db, args: { userId: string; staffUserId: string; actor: Actor }): Promise<{ id: string }> {
+  const p = await maybeOne<{ member_code: string; name: string }>(
+    db,
+    'select member_code, coalesce(nullif(btrim(display_name), \'\'), username, email) as name from public.user_profiles where user_id = $1',
+    [args.userId],
+  );
+  if (!p) throw new OffchainError('No member has that id', 'member_not_found');
+  const existing = await maybeOne<{ id: string }>(db, 'select id from public.offchain_holders where user_id = $1', [args.userId]);
+  if (existing) return existing;
+  const name = p.name.length >= 2 ? p.name.slice(0, 80) : p.member_code;
+  const holder = await createHolder(db, { name, staffUserId: args.staffUserId, actor: args.actor });
+  await linkHolder(db, { holderId: holder.id, memberCode: p.member_code, staffUserId: args.staffUserId, actor: args.actor });
+  return holder;
+}
+
 interface InsertArgs {
   holder: Holder;
   kind: EntryKind;
@@ -125,6 +151,7 @@ interface InsertArgs {
   reason: string;
   allocationId?: string | null;
   reversesEntryId?: string | null;
+  category?: EntryCategory | null;
   idempotencyKey: string;
   staffUserId: string;
   actor: Actor;
@@ -148,9 +175,9 @@ async function insertEntry(db: Db, a: InsertArgs): Promise<{ id: string; replaye
   try {
     row = await one<{ id: string }>(
       db,
-      `insert into public.offchain_entries (holder_id, kind, amount_micro, occurred_on, reason, allocation_id, reverses_entry_id, idempotency_key, created_by)
-       values ($1, $2, $3, $4::date, $5, $6, $7, $8, $9) returning id`,
-      [a.holder.id, a.kind, a.amount.toString(), a.occurredOn, a.reason, a.allocationId ?? null, a.reversesEntryId ?? null, a.idempotencyKey, a.staffUserId],
+      `insert into public.offchain_entries (holder_id, kind, amount_micro, occurred_on, reason, allocation_id, reverses_entry_id, idempotency_key, created_by${a.category ? ', category' : ''})
+       values ($1, $2, $3, $4::date, $5, $6, $7, $8, $9${a.category ? ', $10' : ''}) returning id`,
+      [a.holder.id, a.kind, a.amount.toString(), a.occurredOn, a.reason, a.allocationId ?? null, a.reversesEntryId ?? null, a.idempotencyKey, a.staffUserId, ...(a.category ? [a.category] : [])],
     );
   } catch (err) {
     const code = (err as { code?: string }).code;
@@ -162,6 +189,7 @@ async function insertEntry(db: Db, a: InsertArgs): Promise<{ id: string; replaye
   const details = {
     holderName: a.holder.name,
     kind: a.kind,
+    category: a.category ?? null,
     amountUsdt: formatUnits(a.amount, MICRO_DECIMALS),
     occurredOn: a.occurredOn,
     reason: a.reason,
@@ -186,12 +214,60 @@ async function insertEntry(db: Db, a: InsertArgs): Promise<{ id: string; replaye
 
 export async function recordEntry(
   db: Db,
-  args: { holderId: string; kind: ManualKind; amount: string; occurredOn: string; reason: string; idempotencyKey: string; staffUserId: string; actor: Actor },
+  args: {
+    holderId: string;
+    kind: ManualKind;
+    category?: EntryCategory | null;
+    amount: string;
+    occurredOn: string;
+    reason: string;
+    idempotencyKey: string;
+    staffUserId: string;
+    actor: Actor;
+  },
 ): Promise<{ id: string }> {
+  if (args.category && args.kind !== 'earnings') throw new OffchainError('Only earnings can be a matching bonus', 'invalid_category');
   const reason = requireReason(args.reason);
   const amount = signedMicro(args.kind, args.amount);
   const holder = await lockHolder(db, args.holderId);
   return insertEntry(db, { ...args, holder, amount, reason });
+}
+
+/**
+ * Set the balance to a new total by recording the difference as one
+ * 'adjustment' entry (history stays append-only). `expected` is the balance the
+ * administrator was looking at: if it changed meanwhile, nothing is recorded,
+ * so two edits never stack by surprise. A retry with the same key returns the
+ * entry already recorded. Without a reason, one describing the change is used.
+ */
+export async function setBalance(
+  db: Db,
+  args: { holderId: string; target: string; expected: string; occurredOn: string; reason?: string | null; idempotencyKey: string; staffUserId: string; actor: Actor },
+): Promise<{ id: string }> {
+  const holder = await lockHolder(db, args.holderId);
+  const replay = await maybeOne<{ id: string; holder_id: string }>(db, 'select id, holder_id from public.offchain_entries where idempotency_key = $1', [args.idempotencyKey]);
+  if (replay) {
+    if (replay.holder_id !== holder.id) throw new OffchainError('This request key was already used for a different entry', 'idempotency_conflict');
+    return { id: replay.id };
+  }
+  let target: bigint;
+  let expected: bigint;
+  try {
+    target = parseUnits(args.target, MICRO_DECIMALS);
+    expected = parseUnits(args.expected, MICRO_DECIMALS);
+  } catch {
+    throw new OffchainError('Enter an amount like 125.50 (at most 6 decimals)', 'invalid_amount');
+  }
+  if (target < 0n) throw new OffchainError('A balance cannot be negative', 'insufficient_balance');
+  const current = await offchainBalance(db, holder.id);
+  if (current !== expected) throw new OffchainError('The balance changed while you were editing. Reload and try again.', 'balance_changed');
+  if (target === current) throw new OffchainError('That is already the balance', 'no_change');
+  // The reason is optional here: without one, the entry says what changed.
+  const typed = args.reason?.trim() ?? '';
+  const reason = typed
+    ? requireReason(typed.length >= MIN_REASON ? typed : `Balance edit: ${typed}`)
+    : `Balance changed from ${formatUnits(current, MICRO_DECIMALS)} to ${formatUnits(target, MICRO_DECIMALS)} USDT`;
+  return insertEntry(db, { ...args, holder, kind: 'adjustment', amount: target - current, reason });
 }
 
 /** Correct a mistake: a reversal exactly negates one entry, once. */
@@ -273,6 +349,7 @@ export interface OffchainEntryView {
   reversed: boolean;
   reversesEntryId: string | null;
   allocationId: string | null;
+  category: EntryCategory | null;
 }
 
 export async function listEntries(db: Db, holderId: string): Promise<OffchainEntryView[]> {
@@ -286,11 +363,14 @@ export async function listEntries(db: Db, holderId: string): Promise<OffchainEnt
     reversed: boolean;
     reverses_entry_id: string | null;
     allocation_id: string | null;
+    category: EntryCategory | null;
   }>(
     db,
     `select e.id::text, e.kind, e.amount_micro::text, to_char(e.occurred_on, 'YYYY-MM-DD') as occurred_on, e.reason, e.created_at,
             exists (select 1 from public.offchain_entries r where r.reverses_entry_id = e.id) as reversed,
-            e.reverses_entry_id::text, e.allocation_id
+            e.reverses_entry_id::text, e.allocation_id,
+            -- Read through jsonb so this works before the category migration is applied.
+            to_jsonb(e) ->> 'category' as category
        from public.offchain_entries e where e.holder_id = $1 order by e.id desc`,
     [holderId],
   );
@@ -304,6 +384,7 @@ export async function listEntries(db: Db, holderId: string): Promise<OffchainEnt
     reversed: r.reversed,
     reversesEntryId: r.reverses_entry_id,
     allocationId: r.allocation_id,
+    category: r.category,
   }));
 }
 
@@ -326,6 +407,20 @@ export async function getHolder(db: Db, holderId: string) {
        from public.offchain_holders h left join public.user_profiles p on p.user_id = h.user_id where h.id = $1`,
     [holderId],
   );
+}
+
+/** The off-platform record linked to this account, if any. */
+export async function holderOfUser(db: Db, userId: string) {
+  return maybeOne<{ id: string; name: string; note: string | null; user_id: string | null }>(
+    db,
+    'select id, name, note, user_id from public.offchain_holders where user_id = $1',
+    [userId],
+  );
+}
+
+/** Records not yet linked to any account (people recorded by name before they had a login). */
+export async function unlinkedHolders(db: Db) {
+  return (await listHolders(db)).filter((h) => !h.user_id);
 }
 
 /** Posted assignments to the linked member not yet matched to a 'moved_to_platform' entry. */

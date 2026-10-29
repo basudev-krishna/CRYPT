@@ -71,7 +71,7 @@ export default async function ReferralsPage() {
               ? `Left team ${tree.leftCount} · Right team ${tree.rightCount}. Members who join with your referral id choose their side; only an administrator can move a position.`
               : undefined
           }
-          action={<Link className="text-xs font-medium text-accent hover:underline" href="/rewards">Rank &amp; matching →</Link>}
+          action={<Link className="text-xs font-medium text-accent hover:underline" href="/rewards/matching">Matching bonus →</Link>}
         />
         {tree && (tree.left || tree.right) ? <TeamTree node={tree} /> : <EmptyState title="No team members placed yet" />}
       </Card>

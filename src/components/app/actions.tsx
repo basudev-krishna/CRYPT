@@ -265,6 +265,45 @@ export function KycForm() {
 }
 
 /** TOTP enrolment through Supabase Auth MFA. */
+/** Change the sign-in password, e.g. the one an administrator set when creating the account. */
+export function ChangePasswordForm() {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  return (
+    <form
+      method="post"
+      className="space-y-4"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const form = e.currentTarget;
+        const f = new FormData(form);
+        const newPassword = String(f.get('newPassword'));
+        if (newPassword !== String(f.get('confirm'))) return setMsg({ ok: false, text: 'The new passwords do not match.' });
+        setBusy(true);
+        setMsg(null);
+        const r = await apiPost('/api/me/password', { currentPassword: String(f.get('currentPassword')), newPassword });
+        setBusy(false);
+        setMsg(r.ok ? { ok: true, text: 'Password changed. Use the new one next time you sign in.' } : { ok: false, text: r.error ?? 'Failed' });
+        if (r.ok) form.reset();
+      }}
+    >
+      <Field label="Current password" htmlFor="current-password">
+        <Input id="current-password" name="currentPassword" type="password" autoComplete="current-password" required />
+      </Field>
+      <Field label="New password" htmlFor="new-password" hint="At least 12 characters with upper- and lower-case letters and a digit.">
+        <Input id="new-password" name="newPassword" type="password" autoComplete="new-password" minLength={12} maxLength={72} required />
+      </Field>
+      <Field label="Confirm new password" htmlFor="confirm-password">
+        <Input id="confirm-password" name="confirm" type="password" autoComplete="new-password" required />
+      </Field>
+      {msg ? <Notice tone={msg.ok ? 'success' : 'danger'}>{msg.text}</Notice> : null}
+      <Button type="submit" variant="secondary" disabled={busy}>
+        {busy ? '…' : 'Change password'}
+      </Button>
+    </form>
+  );
+}
+
 export function MfaEnroll({ enrolled }: { enrolled: boolean }) {
   const router = useRouter();
   const [factor, setFactor] = useState<{ id: string; qr: string; secret: string } | null>(null);
