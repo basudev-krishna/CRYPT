@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { Money } from '@/components/ui/money';
-import { Notice, PageHeader } from '@/components/ui/primitives';
+import { PageHeader } from '@/components/ui/primitives';
 import { usdFixed } from '@/server/referrals/program-math';
 
 /** Volumes are 18-dp fixed point in US dollars. */
@@ -21,18 +21,7 @@ export const share = (have: bigint, need: string) => {
   return n === 0n || have >= n ? 10_000 : Number(((have < 0n ? 0n : have) * 10_000n) / n);
 };
 
-/** Page header shared by the Rank and Matching bonus tabs, with the payouts-off notice. */
-export function RewardsHeader({ title, payoutsOn, what }: { title: string; payoutsOn: boolean; what: string }) {
-  return (
-    <>
-      <PageHeader title={title} actions={<Link className="text-sm font-medium text-accent hover:underline" href="/api/rewards/statement">Download statement (CSV)</Link>} />
-      {!payoutsOn ? (
-        <div className="mb-6">
-          <Notice tone="info" title="Program information only">
-            {what} payouts are not switched on yet. Your progress is tracked so you can see it; the rates and bonuses below are provisional settings.
-          </Notice>
-        </div>
-      ) : null}
-    </>
-  );
+/** Page header shared by the Rank and Matching bonus tabs. */
+export function RewardsHeader({ title }: { title: string }) {
+  return <PageHeader title={title} actions={<Link className="text-sm font-medium text-accent hover:underline" href="/api/rewards/statement">Download statement (CSV)</Link>} />;
 }

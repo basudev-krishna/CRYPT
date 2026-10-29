@@ -29,7 +29,7 @@ export default async function MatchingPage() {
   const manualTotal = manual.filter((e) => !e.reversed).reduce((s, e) => s + e.amountMicro, 0n);
   return (
     <>
-      <RewardsHeader title="Matching bonus" payoutsOn={program.matching.enabled} what="Matching" />
+      <RewardsHeader title="Matching bonus" />
 
       <div className="grid gap-6 md:grid-cols-3">
         <Stat label="Left team" value={v.leftCount} sub={<>Volume <Usd value={v.left} /></>} />

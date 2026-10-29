@@ -83,7 +83,7 @@ const SHOWCASE_VIDEO = 'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJO
 /** The brand film, framed on its own below the hero. */
 export function VideoShowcase() {
   return (
-    <section aria-label="EliteWhale film" className="pb-4 pt-16 sm:pt-20" style={{ background: 'linear-gradient(180deg, #070a12 0%, var(--color-login-bg) 100%)' }}>
+    <section aria-label="EliteWhale film" className="pb-4 pt-16 sm:pt-20" style={{ background: 'var(--color-login-bg)' }}>
       <div className={container}>
         <div className="relative overflow-hidden rounded-[32px] shadow-[0_30px_80px_-30px_rgba(0,0,0,0.6)]" style={{ border: '1px solid rgba(217,178,95,0.35)' }}>
           {/* Gradient shows while the video loads, and stays if it fails. */}

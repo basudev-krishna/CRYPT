@@ -22,7 +22,7 @@ export default async function RankPage() {
   const rewards = o.rewards.filter((r) => r.kind !== 'matching');
   return (
     <>
-      <RewardsHeader title="Rank" payoutsOn what="Rank reward" />
+      <RewardsHeader title="Rank" />
 
       <div className="grid gap-6 md:grid-cols-3">
         <Stat label="Current rank" value={progress.current ?? '—'} emphasis={progress.current !== null} sub={progress.next ? `Next: ${progress.next.code}` : 'Top rank reached'} />
