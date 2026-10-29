@@ -12,6 +12,7 @@ import { AllocationDonut, ValueChart } from '@/components/charts/value-chart';
 import { Reveal, Stagger, StaggerItem } from '@/components/ui/motion';
 import { baseToChart, dateTime } from '@/lib/format';
 import { serverEnv } from '@/server/env';
+import { realFundsActive } from '@/server/phase-guard';
 import { memberHolding, microToBase } from '@/server/offchain/holdings';
 import { heldLabel } from '@/components/ui/offchain';
 
@@ -66,7 +67,11 @@ export default async function DashboardPage() {
     .slice(0, 8);
   // Group mode: no investment pool, so only balances and activity are shown.
   const group = serverEnv().GROUP_MODE;
-  const quickActions = group ? QUICK_ACTIONS.filter((q) => q.href !== '/portfolio') : QUICK_ACTIONS;
+  // Testnet wording ("test USDT") would be false with real funds.
+  const realFunds = realFundsActive();
+  const quickActions = (group ? QUICK_ACTIONS.filter((q) => q.href !== '/portfolio') : QUICK_ACTIONS).map((q) =>
+    q.href === '/deposit' && realFunds ? { ...q, hint: 'Add USDT (BEP20)' } : q,
+  );
   const perfAvailable = d.performance.month.periods > 0 && !d.position?.latestValuationFailed;
   const name = d.profile?.displayName?.split(' ')[0];
   const slices = [
