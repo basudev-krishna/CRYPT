@@ -87,9 +87,10 @@ export interface MemberVolumes extends Volumes {
 }
 
 /**
- * Operator-funded earnings of each member's whole left and right team and of
- * the member themselves (18-dp fixed), for `userIds` or everyone (null).
- * Volumes are lifetime totals: nothing resets or expires.
+ * For `userIds` or everyone (null), in 18-dp fixed point, lifetime totals:
+ *   left / right: operator-funded earnings of the member's whole left and right
+ *     team (never deposits; matching and rank team volumes are not recruitment-funded);
+ *   self: the member's own deposits (rank qualification only; see `dep`).
  */
 export async function memberVolumes(db: Db, userIds: string[] | null): Promise<Map<string, MemberVolumes>> {
   const rows = await many<{ user_id: string; left_v: string; right_v: string; self_v: string; left_n: number; right_n: number }>(
@@ -101,15 +102,37 @@ export async function memberVolumes(db: Db, userIds: string[] | null): Promise<M
        select c.anc, c.side, b.user_id from closure c join public.binary_placements b on b.parent_user_id = c.node
      ),
      earn as (select user_id, sum(amount_fixed) as amt from public.reward_base_earnings group by user_id),
+     -- Self investment = the member's own deposits (18-dp fixed), lifetime: credited on the platform
+     -- (own deposit or an admin assignment/distribution of a group-wallet receipt) plus contributions
+     -- handed to the team offline. Reversed entries don't count, and offline money later moved
+     -- on-platform is counted once (as the offline contribution).
+     dep as (
+       select user_id, sum(amt) as amt from (
+         select a.user_id, (l.amount * (10::numeric ^ (18 - t.decimals)))::numeric(78,0) as amt
+           from public.journal_lines l
+           join public.ledger_accounts a on a.id = l.account_id and a.purpose = 'user_cash'
+           join public.journal_entries e on e.id = l.entry_id
+           join public.supported_tokens t on t.id = l.token_id
+          where l.direction = 'C' and e.event_type in ('deposit_credit', 'deposit_allocated')
+            and not exists (select 1 from public.journal_entries r where r.reverses_entry_id = e.id)
+            and not (e.source_type = 'allocation'
+                     and exists (select 1 from public.offchain_entries o where o.allocation_id::text = e.source_id and o.kind = 'moved_to_platform'))
+         union all
+         select h.user_id, (o.amount_micro * (10::numeric ^ 12))::numeric(78,0)
+           from public.offchain_entries o join public.offchain_holders h on h.id = o.holder_id
+          where o.kind = 'contribution' and h.user_id is not null
+            and not exists (select 1 from public.offchain_entries r where r.reverses_entry_id = o.id)
+       ) x group by user_id
+     ),
      legs as (
        select c.anc,
               sum(coalesce(e.amt, 0)) filter (where c.side = 'left') as l, sum(coalesce(e.amt, 0)) filter (where c.side = 'right') as r,
               count(*) filter (where c.side = 'left') as ln, count(*) filter (where c.side = 'right') as rn
          from closure c left join earn e on e.user_id = c.node group by c.anc
      )
-     select p.user_id, coalesce(legs.l, 0)::text as left_v, coalesce(legs.r, 0)::text as right_v, coalesce(e.amt, 0)::text as self_v,
+     select p.user_id, coalesce(legs.l, 0)::text as left_v, coalesce(legs.r, 0)::text as right_v, coalesce(dep.amt, 0)::text as self_v,
             coalesce(legs.ln, 0)::int as left_n, coalesce(legs.rn, 0)::int as right_n
-       from public.user_profiles p left join legs on legs.anc = p.user_id left join earn e on e.user_id = p.user_id
+       from public.user_profiles p left join legs on legs.anc = p.user_id left join dep on dep.user_id = p.user_id
       where $1::uuid[] is null or p.user_id = any($1::uuid[])`,
     [userIds],
   );

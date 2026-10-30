@@ -28,7 +28,7 @@ export default async function RankPage() {
       <div className="grid gap-6 md:grid-cols-3">
         <Stat label="Current rank" value={progress.current ?? '—'} emphasis={progress.current !== null} sub={progress.next ? `Next: ${progress.next.code}` : 'Top rank reached'} />
         <Stat label="Ranks reached" value={achieved.size} sub={`of ${program.ranks.levels.length}`} />
-        <Stat label="Self investment" value={<Usd value={v.self} />} />
+        <Stat label="Self investment" value={<Usd value={v.self} />} sub="Your own deposits, on the platform and handed to the team" />
       </div>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-2">

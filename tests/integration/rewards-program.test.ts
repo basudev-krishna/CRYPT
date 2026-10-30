@@ -160,24 +160,40 @@ describe('team position at sign-up', () => {
 });
 
 describe('reward base', () => {
-  it('counts operator-funded earnings and never deposits', async () => {
+  it('counts team volumes in operator-funded earnings (never deposits) and self investment in own deposits', async () => {
     const sponsor = await createUser();
     const member = await createUser({ referralCode: await code(sponsor), side: 'left' });
     await allocate(await receipt('500'), 'assignment', [{ userId: member, amount: '500' }]);
     await fundPool('100');
     let v = await memberVolumes(web, [sponsor, member]);
-    expect(v.get(member)!.self).toBe(0n);
-    expect(v.get(sponsor)!.left).toBe(0n);
+    expect(v.get(member)!.self).toBe(usdFixed('500')); // the member's own deposit
+    expect(v.get(sponsor)!.left).toBe(0n); // a downline deposit never counts in team volume
 
     const adj = await bonus(member, '40');
     v = await memberVolumes(web, [sponsor, member]);
-    expect(v.get(member)!.self).toBe(usdFixed('40'));
+    expect(v.get(member)!.self).toBe(usdFixed('500')); // earnings don't change self investment
     expect(v.get(sponsor)).toMatchObject({ left: usdFixed('40'), right: 0n, leftCount: 1, rightCount: 0 });
 
-    // A reversed bonus no longer counts.
+    // A reversed bonus no longer counts in team volume.
     const rev = await withTransaction(web, (db) => reverseAdjustment(db, { adjustmentId: adj, reason: 'Bonus was recorded twice', staffUserId: adminId, actor: staff() }));
     await withTransaction(worker, (db) => postAdjustment(db, rev.id, service));
-    expect((await memberVolumes(web, [member])).get(member)!.self).toBe(0n);
+    expect((await memberVolumes(web, [sponsor])).get(sponsor)!.left).toBe(0n);
+  });
+
+  it('counts offline contributions in self investment, net of reversals', async () => {
+    const member = await createUser();
+    const holder = await one<{ id: string }>(admin, 'insert into public.offchain_holders (name, user_id, created_by, linked_by, linked_at) values ($1, $2, $3, $3, now()) returning id', ['Member', member, adminId]);
+    const add = (micro: string, key: string, kind = 'contribution', reverses: string | null = null) =>
+      one<{ id: string }>(
+        admin,
+        "insert into public.offchain_entries (holder_id, kind, amount_micro, occurred_on, reason, idempotency_key, created_by, reverses_entry_id) values ($1, $2, $3, current_date, 'Cash handed to the team', $4, $5, $6) returning id",
+        [holder.id, kind, micro, key, adminId, reverses],
+      );
+    const first = await add('300000000', 'c1'); // 300 USDT
+    await add('200000000', 'c2'); // 200 USDT
+    expect((await memberVolumes(web, [member])).get(member)!.self).toBe(usdFixed('500'));
+    await add('-300000000', 'r1', 'reversal', first.id);
+    expect((await memberVolumes(web, [member])).get(member)!.self).toBe(usdFixed('200'));
   });
 
   it('reports total income as rewards paid from the pool, net of reversals, never deposits', async () => {
@@ -210,7 +226,7 @@ describe('reward base', () => {
     expect(await balanceOf('operator_float', tokenId)).toBe(0n);
     expect(await getRewardIncome(web, member, tokenId)).toBe(usdt('18'));
     const v = await memberVolumes(web, [sponsor, member]);
-    expect(v.get(member)!.self).toBe(usdFixed('18'));
+    expect(v.get(member)!.self).toBe(0n); // self investment counts deposits, not income
     expect(v.get(sponsor)!.left).toBe(usdFixed('18'));
     const ev = await one<{ event_type: string }>(admin, "select event_type from public.journal_entries where source_type = 'manual_adjustment' and source_id = $1", [fix.id]);
     expect(ev.event_type).toBe('income_correction');
