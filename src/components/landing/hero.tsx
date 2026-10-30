@@ -265,10 +265,6 @@ export function Hero({ signedIn, realFunds }: { signedIn: boolean; realFunds: bo
                 Discover EliteWhale
               </Link>
             </motion.div>
-
-            <motion.p custom={3} variants={fadeUp} initial="hidden" animate="visible" className="mt-7 text-xs" style={{ opacity: 0.6, maxWidth: 480 }}>
-              Returns are never guaranteed. Investment values can fall as well as rise, and you can lose some or all of the amount invested.
-            </motion.p>
           </div>
         </div>
 
