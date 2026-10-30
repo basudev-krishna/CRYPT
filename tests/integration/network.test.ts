@@ -67,13 +67,13 @@ describe('left/right positions', () => {
 
     let t = (await teamTree(web, root))!;
     expect([t.leftCount, t.rightCount]).toEqual([2, 1]);
-    expect(t.left?.left?.memberCode).toBe(await code(ll));
+    expect(t.left[0]?.left[0]?.memberCode).toBe(await code(ll));
 
     // Moving l (with ll) under r's right side.
     await place(l, r, 'right');
     t = (await teamTree(web, root))!;
     expect([t.leftCount, t.rightCount]).toEqual([0, 3]);
-    expect(t.right?.right?.left?.memberCode).toBe(await code(ll));
+    expect(t.right[0]?.right[0]?.left[0]?.memberCode).toBe(await code(ll));
 
     await withTransaction(web, (db) => removePlacement(db, { userId: l, reason: 'Left the group for now', staffUserId: adminId, actor: actor() }));
     t = (await teamTree(web, root))!;
@@ -92,10 +92,10 @@ describe('left/right positions', () => {
     // n takes a's spot; a (with a1) goes to the end of n's left side, under m.
     await place(n, root, 'left');
     const t = (await teamTree(web, root))!;
-    expect(t.left?.memberCode).toBe(await code(n));
-    expect(t.left?.left?.memberCode).toBe(await code(m));
-    expect(t.left?.left?.left?.memberCode).toBe(await code(a));
-    expect(t.left?.left?.left?.left?.memberCode).toBe(await code(a1));
+    expect(t.left[0]?.memberCode).toBe(await code(n));
+    expect(t.left[0]?.left[0]?.memberCode).toBe(await code(m));
+    expect(t.left[0]?.left[0]?.left[0]?.memberCode).toBe(await code(a));
+    expect(t.left[0]?.left[0]?.left[0]?.left[0]?.memberCode).toBe(await code(a1));
     expect(t.leftCount).toBe(4);
     const moved = await one<{ old_parent_id: string; new_parent_id: string; reason: string }>(
       admin,
@@ -142,5 +142,51 @@ describe('referral bonuses', () => {
     expect(await balanceOf('user_cash', tokenId, member)).toBe(0n);
     expect(await balanceOf('referral_reward_fund', tokenId)).toBe(usdt('20'));
     expect(await checkIntegrity(admin)).toEqual({ unbalancedTokens: [], cacheMismatches: [] });
+  });
+});
+
+describe('administrator: unlimited members per side', () => {
+  it('holds any number of members on each side, on the same level, without displacing anyone', async () => {
+    const [a, b, c, d] = [await createUser(), await createUser(), await createUser(), await createUser()];
+    await place(a, adminId, 'left');
+    await place(b, adminId, 'left');
+    await place(c, adminId, 'left');
+    await place(d, adminId, 'right');
+    const t = (await teamTree(web, adminId))!;
+    expect(t.left.map((n) => n.memberCode).sort()).toEqual([await code(a), await code(b), await code(c)].sort());
+    expect(t.right.map((n) => n.memberCode)).toEqual([await code(d)]);
+    expect([t.leftCount, t.rightCount]).toEqual([3, 1]);
+    // Nobody was moved down to make room.
+    expect((await admin.query("select count(*)::int as n from public.placement_history where reason like 'Moved down%'")).rows[0].n).toBe(0);
+  });
+
+  it('places sign-ups with an administrator’s referral id directly under them', async () => {
+    const adminCode = await code(adminId);
+    const x = await createUser({ referralCode: adminCode, side: 'left' });
+    const y = await createUser({ referralCode: adminCode, side: 'left' });
+    const z = await createUser({ referralCode: adminCode, side: 'right' });
+    const parents = await admin.query('select user_id, parent_user_id, side from public.binary_placements where user_id = any($1::uuid[])', [[x, y, z]]);
+    expect(parents.rows.every((r) => r.parent_user_id === adminId)).toBe(true);
+  });
+
+  it('lets the administrator change a member’s level, and keeps one per side for everyone else', async () => {
+    const [a, a1, a2] = [await createUser(), await createUser(), await createUser()];
+    await place(a, adminId, 'left');
+    await place(a1, a, 'left');
+    await place(a2, a1, 'left'); // a2 is three levels down
+    await place(a2, adminId, 'right'); // moved up to the administrator's own level
+    let t = (await teamTree(web, adminId))!;
+    expect(t.right.map((n) => n.memberCode)).toEqual([await code(a2)]);
+    expect(t.left[0]?.left[0]?.left).toEqual([]);
+
+    // Under a member, a taken spot still moves its occupant down (one per side).
+    const n = await createUser();
+    await place(n, a, 'left');
+    t = (await teamTree(web, adminId))!;
+    expect(t.left[0]?.left.map((x) => x.memberCode)).toEqual([await code(n)]);
+    expect(t.left[0]?.left[0]?.left[0]?.memberCode).toBe(await code(a1));
+    // And the database refuses a second member on a member's side.
+    const extra = await createUser();
+    await expect(admin.query("insert into public.binary_placements (user_id, parent_user_id, side, placed_by) values ($1, $2, 'left', $3)", [extra, a, adminId])).rejects.toThrow(/taken/);
   });
 });

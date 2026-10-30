@@ -83,9 +83,15 @@ async function inTeamOf(db: Db, userId: string, rootId: string): Promise<boolean
 }
 
 /** The last member down `side`'s outer edge from `rootId` (the root itself if that side is free). */
+async function isAdmin(db: Db, userId: string): Promise<boolean> {
+  return Boolean(await maybeOne(db, "select 1 from public.staff_roles where user_id = $1 and role = 'admin'", [userId]));
+}
+
 async function outerEdge(db: Db, rootId: string, side: Side): Promise<string> {
   let cursor = rootId;
   for (let steps = 0; steps < 10_000; steps++) {
+    // An administrator takes any number of members per side, so the edge stops there.
+    if (await isAdmin(db, cursor)) return cursor;
     const child = await maybeOne<{ user_id: string }>(db, 'select user_id from public.binary_placements where parent_user_id = $1 and side = $2', [cursor, side]);
     if (!child) return cursor;
     cursor = child.user_id;
@@ -97,7 +103,8 @@ async function outerEdge(db: Db, rootId: string, side: Side): Promise<string> {
  * Place a member (or move them, with their whole team) to the left or right of
  * any parent. If that spot is taken, the member there moves down (with their
  * team) to the end of the same side under the newly placed member, so the
- * administrator can put anyone anywhere. Both moves are recorded.
+ * administrator can put anyone anywhere. Under an administrator nothing is
+ * displaced: they hold any number of members per side. Both moves are recorded.
  */
 export async function setPlacement(
   db: Db,
@@ -114,12 +121,14 @@ export async function setPlacement(
   if (before && before.parent_user_id === parent.user_id && before.side === args.side) return;
   if (await inTeamOf(db, parent.user_id, args.userId)) throw new NetworkError('A member cannot be placed inside their own team', 'not_allowed');
 
-  const occupant = await maybeOne<{ user_id: string; member_code: string }>(
-    db,
-    `select b.user_id, p.member_code from public.binary_placements b join public.user_profiles p on p.user_id = b.user_id
-      where b.parent_user_id = $1 and b.side = $2 for update of b`,
-    [parent.user_id, args.side],
-  );
+  const occupant = (await isAdmin(db, parent.user_id))
+    ? null
+    : await maybeOne<{ user_id: string; member_code: string }>(
+        db,
+        `select b.user_id, p.member_code from public.binary_placements b join public.user_profiles p on p.user_id = b.user_id
+          where b.parent_user_id = $1 and b.side = $2 for update of b`,
+        [parent.user_id, args.side],
+      );
   let displaced: { userId: string; memberCode: string; newParentId: string } | null = null;
   try {
     if (occupant) {
@@ -190,8 +199,9 @@ export interface TreeNode {
   userId: string;
   memberCode: string;
   side: Side | null;
-  left: TreeNode | null;
-  right: TreeNode | null;
+  /** Direct members on each side: at most one, except under an administrator. */
+  left: TreeNode[];
+  right: TreeNode[];
   /** Members in each side's whole team (not just direct children). */
   leftCount: number;
   rightCount: number;
@@ -215,15 +225,15 @@ export function buildTree(rows: Row[], maxDepth: number, counts: Map<string, num
   for (const r of rows) if (r.parent_user_id && r.depth > 0) byParent.set(r.parent_user_id, [...(byParent.get(r.parent_user_id) ?? []), r]);
   const make = (r: Row): TreeNode => {
     const kids = byParent.get(r.user_id) ?? [];
-    const left = kids.find((k) => k.side === 'left');
-    const right = kids.find((k) => k.side === 'right');
-    const size = (k: Row | undefined) => (k ? 1 + (counts.get(k.user_id) ?? 0) : 0);
+    const left = kids.filter((k) => k.side === 'left').sort((a, b) => a.member_code.localeCompare(b.member_code));
+    const right = kids.filter((k) => k.side === 'right').sort((a, b) => a.member_code.localeCompare(b.member_code));
+    const size = (ks: Row[]) => ks.reduce((n, k) => n + 1 + (counts.get(k.user_id) ?? 0), 0);
     return {
       userId: r.user_id,
       memberCode: r.member_code,
       side: r.depth === 0 ? null : r.side,
-      left: left ? make(left) : null,
-      right: right ? make(right) : null,
+      left: left.map(make),
+      right: right.map(make),
       leftCount: size(left),
       rightCount: size(right),
       truncated: r.depth >= maxDepth && (counts.get(r.user_id) ?? 0) > 0,

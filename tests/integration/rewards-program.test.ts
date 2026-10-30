@@ -138,14 +138,16 @@ describe('team position at sign-up', () => {
     expect(await placement(right)).toMatchObject({ parent_user_id: sponsor, side: 'right' });
   });
 
-  it("never fills up an administrator's referral id, even in direct mode", async () => {
-    await save({ placement_mode: 'direct' });
-    const ref = await code(adminId);
-    const first = await createUser({ referralCode: ref, side: 'left' });
-    expect(await placementAvailability(web, ref)).toMatchObject({ mode: 'outer', direct: { left: false, right: true } });
-    await expect(checkRegistration(web, { username: 'second_left', referralCode: ref, teamSide: 'left' })).resolves.toBeUndefined();
-    const second = await createUser({ referralCode: ref, side: 'left' });
-    expect(await placement(second)).toMatchObject({ parent_user_id: first, side: 'left' });
+  it("never fills up an administrator's referral id: every sign-up goes directly under them, in either mode", async () => {
+    for (const mode of ['direct', 'outer'] as const) {
+      await save({ placement_mode: mode });
+      const ref = await code(adminId);
+      await createUser({ referralCode: ref, side: 'left' });
+      expect(await placementAvailability(web, ref)).toMatchObject({ mode: 'direct', direct: { left: true, right: true } });
+      await expect(checkRegistration(web, { username: `second_left_${mode}`, referralCode: ref, teamSide: 'left' })).resolves.toBeUndefined();
+      const second = await createUser({ referralCode: ref, side: 'left' });
+      expect(await placement(second)).toMatchObject({ parent_user_id: adminId, side: 'left' });
+    }
   });
 
   it('never lets two concurrent sign-ups take the same position', async () => {

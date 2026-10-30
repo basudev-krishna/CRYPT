@@ -420,9 +420,9 @@ export async function placementAvailability(db: Db, referralCode: string): Promi
   ]);
   return {
     sponsorCode: sponsor.member_code,
-    // An administrator's referral id never fills up: sign-ups go further down the chosen side (see place_new_member).
-    mode: admin ? 'outer' : params.placement_mode,
-    direct: { left: !taken.some((t) => t.side === 'left'), right: !taken.some((t) => t.side === 'right') },
+    // An administrator's referral id never fills up: sign-ups go directly under them on either side (see place_new_member).
+    mode: admin ? 'direct' : params.placement_mode,
+    direct: admin ? { left: true, right: true } : { left: !taken.some((t) => t.side === 'left'), right: !taken.some((t) => t.side === 'right') },
   };
 }
 

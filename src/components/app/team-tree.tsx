@@ -13,7 +13,7 @@ export function TeamTree({ node, hrefFor, depth = 0 }: { node: TreeNode; hrefFor
   ) : (
     <span className="font-mono">{node.memberCode}</span>
   );
-  const hasKids = node.left || node.right;
+  const hasKids = node.left.length > 0 || node.right.length > 0;
   return (
     <details open={depth < 2} className="group">
       <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-surface-3">
@@ -27,16 +27,15 @@ export function TeamTree({ node, hrefFor, depth = 0 }: { node: TreeNode; hrefFor
       </summary>
       {hasKids ? (
         <div className="ml-3 border-l border-line pl-3">
-          {(['left', 'right'] as const).map((side) => {
-            const child = node[side];
-            return child ? (
-              <TeamTree key={side} node={child} hrefFor={hrefFor} depth={depth + 1} />
+          {(['left', 'right'] as const).map((side) =>
+            node[side].length ? (
+              node[side].map((child) => <TeamTree key={child.userId} node={child} hrefFor={hrefFor} depth={depth + 1} />)
             ) : (
               <p key={side} className="px-2 py-1 text-xs text-fg-subtle">
                 {side}: empty
               </p>
-            );
-          })}
+            ),
+          )}
         </div>
       ) : null}
     </details>
