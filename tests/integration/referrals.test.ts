@@ -15,7 +15,7 @@ import { creditDeposit, ingestNetwork, refreshDeposit } from '../../src/server/d
 import { createAllocation, postAllocation, type AllocationKind } from '../../src/server/deposits/allocations';
 import { getMembership } from '../../src/server/queries/user';
 import { adminReferrals } from '../../src/server/queries/admin';
-import { detectReferralRewards, postReferralReward, reviewReferralReward, saveReferralPolicy } from '../../src/server/referrals/rewards';
+import { claimReferralReward, detectReferralRewards, postReferralReward, referralCommissions, reviewReferralReward, saveReferralPolicy } from '../../src/server/referrals/rewards';
 import { DEFAULT_TIERS } from '../../src/server/referrals/rewards';
 
 const GROUP = '0x0000000000000000000000000000000000000a07';
@@ -63,7 +63,12 @@ const enable = (reward_amount = '10') =>
 const detect = () => withTransaction(worker, (db) => detectReferralRewards(db));
 const review = (rewardId: string, decision: 'approve' | 'reject', staffUserId = adminId) =>
   withTransaction(web, (db) => reviewReferralReward(db, { rewardId, decision, note: 'Checked the referral by hand', staffUserId, actor: { type: 'staff', id: staffUserId } }));
-const post = (id: string) => withTransaction(worker, (db) => postReferralReward(db, id, service));
+/** The referrer's claim, which payment waits for (set directly; claim rules are tested on their own). */
+const markClaimed = (id: string) => admin.query("update public.referral_rewards set claimed_at = now() where id = $1 and claimed_at is null and status in ('pending', 'approved')", [id]);
+const post = async (id: string) => {
+  await markClaimed(id);
+  return withTransaction(worker, (db) => postReferralReward(db, id, service));
+};
 const rewardFor = (referred: string) => one<{ id: string; status: string; amount_base: string; error: string | null }>(
   admin,
   'select id, status, amount_base::text, error from public.referral_rewards where referred_user_id = $1',
@@ -139,6 +144,70 @@ describe('operator-funded referral rewards', () => {
     expect(await balanceOf('user_cash', tokenId, sponsor)).toBe(usdt('10'));
     expect(await balanceOf('referral_reward_fund', tokenId)).toBe(usdt('15'));
     expect(await balanceOf('user_cash', tokenId, referred)).toBe(usdt('200')); // untouched
+    expect(await checkIntegrity(admin)).toEqual(clean);
+  });
+
+  it('pays a percentage of the first deposit only, once per referred member', async () => {
+    const sponsor = await createUser();
+    const referred = await createUser({ referralCode: await memberCode(sponsor) });
+    await credit(referred, '200');
+    await credit(referred, '300'); // a later deposit does not change the reward
+    await withTransaction(web, (db) =>
+      saveReferralPolicy(db, staff(), { enabled: true, reward_amount: '0', reward_bps: 500, program_start: '2000-01-01T00:00:00.000Z', tiers: DEFAULT_TIERS }, 'Five percent commission'),
+    );
+    expect(await detect()).toBe(1);
+    expect(await detect()).toBe(0);
+    const r = await rewardFor(referred);
+    expect(r.amount_base).toBe(usdt('10').toString()); // 5% of the first 200
+
+    await review(r.id, 'approve');
+    await allocate(await receipt('10'), 'referral_fund', []);
+    expect(await post(r.id)).toBe('posted');
+    expect(await balanceOf('user_cash', tokenId, sponsor)).toBe(usdt('10'));
+    expect(await balanceOf('user_cash', tokenId, referred)).toBe(usdt('500')); // untouched
+    expect(await checkIntegrity(admin)).toEqual(clean);
+  });
+
+  it('shows the referrer a commission as soon as it is earned, then follows it to payment', async () => {
+    const sponsor = await createUser();
+    const referred = await createUser({ referralCode: await memberCode(sponsor) });
+    const view = async () => (await referralCommissions(web, sponsor))[0]!;
+    expect((await view()).status).toBe('program_off');
+    await withTransaction(web, (db) =>
+      saveReferralPolicy(db, staff(), { enabled: true, reward_amount: '0', reward_bps: 500, program_start: '2000-01-01T00:00:00.000Z', tiers: DEFAULT_TIERS }, 'Five percent commission'),
+    );
+    expect((await view()).status).toBe('no_deposit');
+    await credit(referred, '200');
+    expect(await view()).toMatchObject({ status: 'earned', commissionBase: usdt('10') }); // before the worker runs
+    await detect();
+    expect(await view()).toMatchObject({ status: 'pending', commissionBase: usdt('10') });
+  });
+
+  it('pays a reward only after the referrer claims it, and only the referrer can claim', async () => {
+    const sponsor = await createUser();
+    const other = await createUser();
+    const referred = await createUser({ referralCode: await memberCode(sponsor) });
+    await credit(referred, '100');
+    await enable('10');
+    await detect();
+    const r = await rewardFor(referred);
+    await review(r.id, 'approve');
+    await allocate(await receipt('10'), 'referral_fund', []);
+
+    // Approved and funded, but not claimed: shown, not paid.
+    expect(await withTransaction(worker, (db) => postReferralReward(db, r.id, service))).toBe('deferred');
+    expect(await balanceOf('user_cash', tokenId, sponsor)).toBe(0n);
+
+    const claim = (userId: string) => withTransaction(web, (db) => claimReferralReward(db, { userId, rewardId: r.id, actor: { type: 'user', id: userId } }));
+    await expect(claim(other)).rejects.toMatchObject({ code: 'not_found' });
+    await claim(sponsor);
+    await claim(sponsor); // harmless twice
+    // The web role cannot withdraw a claim.
+    await expect(web.query('update public.referral_rewards set claimed_at = null where id = $1', [r.id])).rejects.toThrow(/claim cannot be changed/);
+
+    expect(await withTransaction(worker, (db) => postReferralReward(db, r.id, service))).toBe('posted');
+    expect(await balanceOf('user_cash', tokenId, sponsor)).toBe(usdt('10'));
+    await expect(claim(sponsor)).resolves.toBeUndefined(); // already claimed: no-op
     expect(await checkIntegrity(admin)).toEqual(clean);
   });
 

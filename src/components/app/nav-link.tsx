@@ -8,6 +8,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   BookOpenCheck,
+  CalendarClock,
   Gift,
   Network,
   Trophy,
@@ -48,6 +49,7 @@ export const NAV_ICONS = {
   compliance: ShieldCheck,
   audit: ScrollText,
   ledger: BookOpenCheck,
+  returns: CalendarClock,
   support: LifeBuoy,
 } satisfies Record<string, LucideIcon>;
 export type NavIcon = keyof typeof NAV_ICONS;

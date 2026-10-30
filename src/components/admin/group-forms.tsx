@@ -15,8 +15,8 @@ export interface MemberOption {
  * split across several (distribution), or to the operator's referral reward
  * fund. Amounts must add up exactly to the receipt; the server checks this again.
  */
-type AllocationKind = 'assignment' | 'distribution' | 'referral_fund' | 'operator_float';
-const isTopUp = (k: AllocationKind) => k === 'referral_fund' || k === 'operator_float';
+type AllocationKind = 'assignment' | 'distribution' | 'referral_fund' | 'operator_float' | 'business_revenue';
+const isTopUp = (k: AllocationKind) => k === 'referral_fund' || k === 'operator_float' || k === 'business_revenue';
 
 export function AllocationForm({ depositId, amountBase, decimals, members }: { depositId: string; amountBase: string; decimals: number; members: MemberOption[] }) {
   const router = useRouter();
@@ -24,6 +24,9 @@ export function AllocationForm({ depositId, amountBase, decimals, members }: { d
   const [kind, setKind] = useState<AllocationKind>('assignment');
   const [lines, setLines] = useState([{ userId: members[0]?.userId ?? '', amount: total }]);
   const [reason, setReason] = useState('');
+  const [revenue, setRevenue] = useState({ businessLine: '', periodStart: '', periodEnd: '', evidenceReference: '' });
+  const revenueReady =
+    revenue.businessLine.trim().length >= 3 && revenue.periodStart !== '' && revenue.periodEnd >= revenue.periodStart && revenue.evidenceReference.trim().length >= 5;
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -43,11 +46,19 @@ export function AllocationForm({ depositId, amountBase, decimals, members }: { d
         ? 'Credit this deposit to the selected member?'
         : kind === 'distribution'
           ? `Distribute ${total} across ${lines.length} members?`
-          : `Add ${total} to the ${kind === 'referral_fund' ? 'referral reward fund' : 'operator float'}? Only send operator money here, never a member's deposit.`;
+          : kind === 'business_revenue'
+            ? `Record ${total} as business revenue for daily returns? Only revenue the business earned, never a participant's capital.`
+            : `Add ${total} to the ${kind === 'referral_fund' ? 'referral reward fund' : 'operator float'}? Only send operator money here, never a member's deposit.`;
     if (!window.confirm(prompt)) return;
     setBusy(true);
     setMsg(null);
-    const r = await apiPost('/api/admin/allocations', { depositId, kind, reason, lines: isTopUp(kind) ? [] : lines });
+    const r = await apiPost('/api/admin/allocations', {
+      depositId,
+      kind,
+      reason,
+      lines: isTopUp(kind) ? [] : lines,
+      ...(kind === 'business_revenue' ? { revenue } : {}),
+    });
     setBusy(false);
     if (!r.ok) setMsg({ ok: false, text: r.error ?? 'Failed' });
     else {
@@ -71,7 +82,16 @@ export function AllocationForm({ depositId, amountBase, decimals, members }: { d
         <option value="distribution">Distribute across members</option>
         <option value="referral_fund">Operator top-up of the referral reward fund</option>
         <option value="operator_float">Operator top-up of the float (for manual adjustments)</option>
+        <option value="business_revenue">Business revenue (funds daily returns)</option>
       </Select>
+      {kind === 'business_revenue' ? (
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Input aria-label="Business line" placeholder="Business line (e.g. trading desk A)" value={revenue.businessLine} onChange={(e) => setRevenue((r) => ({ ...r, businessLine: e.target.value }))} className="sm:col-span-2" />
+          <Input aria-label="Revenue period start" type="date" value={revenue.periodStart} onChange={(e) => setRevenue((r) => ({ ...r, periodStart: e.target.value }))} />
+          <Input aria-label="Revenue period end" type="date" value={revenue.periodEnd} onChange={(e) => setRevenue((r) => ({ ...r, periodEnd: e.target.value }))} />
+          <Input aria-label="Evidence reference" placeholder="Evidence (invoice, statement or contract reference)" value={revenue.evidenceReference} onChange={(e) => setRevenue((r) => ({ ...r, evidenceReference: e.target.value }))} className="sm:col-span-2" />
+        </div>
+      ) : null}
       {!isTopUp(kind) && lines.map((l, i) => (
         <div key={i} className="flex gap-2">
           <Select aria-label="Member" value={l.userId} onChange={(e) => setLine(i, { userId: e.target.value })} className="min-w-0 flex-1">
@@ -102,8 +122,8 @@ export function AllocationForm({ depositId, amountBase, decimals, members }: { d
       <Field label={isTopUp(kind) ? 'Reason (e.g. who sent it and why)' : 'Reason (shown to the member)'} htmlFor={`reason-${depositId}`}>
         <Textarea id={`reason-${depositId}`} value={reason} onChange={(e) => setReason(e.target.value)} rows={2} />
       </Field>
-      <Button className="h-8 px-3 text-xs" disabled={busy || reason.trim().length < 10 || remaining !== 0n || (!isTopUp(kind) && members.length === 0)} onClick={submit}>
-        {busy ? '…' : kind === 'assignment' ? 'Assign' : kind === 'distribution' ? 'Distribute' : 'Add to operator account'}
+      <Button className="h-8 px-3 text-xs" disabled={busy || reason.trim().length < 10 || remaining !== 0n || (!isTopUp(kind) && members.length === 0) || (kind === 'business_revenue' && !revenueReady)} onClick={submit}>
+        {busy ? '…' : kind === 'assignment' ? 'Assign' : kind === 'distribution' ? 'Distribute' : kind === 'business_revenue' ? 'Record revenue' : 'Add to operator account'}
       </Button>
       {msg ? <Notice tone={msg.ok ? 'success' : 'danger'}>{msg.text}</Notice> : null}
     </div>

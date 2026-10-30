@@ -17,6 +17,16 @@ import { failCorrection, listPendingAllocationIds, listPendingCorrectionIds, pos
 import { detectReferralRewards, listApprovedReferralRewardIds, postReferralReward } from '../src/server/referrals/rewards';
 import { detectMatchingRewards, evaluateRanks, listApprovedProgramRewardIds, postProgramReward } from '../src/server/referrals/program';
 import { listPendingAdjustmentIds, postAdjustment } from '../src/server/adjustments/manual';
+import {
+  accrueSubscription,
+  listAccruingSubscriptionIds,
+  listPendingSubscriptionIds,
+  listReturnTokenIds,
+  matureAccruals,
+  openSubscription,
+  redeemSubscription,
+  settlePayables,
+} from '../src/server/returns/service';
 import { notify, raiseRiskEvent, serviceActor } from '../src/server/ops';
 import { dispatchRiskAlerts, getAlertSender } from '../src/server/alerts';
 import type { JobPayloads } from '../src/server/jobs/queues';
@@ -82,6 +92,21 @@ export function createHandlers(pool: pg.Pool, enqueue: Enqueue, env: NodeJS.Proc
       for (const id of await listApprovedProgramRewardIds(pool)) {
         await withTransaction(pool, (db) => postProgramReward(db, id, serviceActor('program-rewards')));
       }
+    },
+
+    /**
+     * Fixed daily returns: open requested subscriptions, return requested
+     * principal, accrue finished days, move due returns to payable, then pay
+     * them from the revenue reserve. One transaction per step and subject, so
+     * a failure in one never blocks the others; every step is idempotent.
+     */
+    async returnsProcess() {
+      const actor = serviceActor('daily-returns');
+      for (const id of await listPendingSubscriptionIds(pool, 'pending')) await withTransaction(pool, (db) => openSubscription(db, id, actor));
+      for (const id of await listAccruingSubscriptionIds(pool)) await withTransaction(pool, (db) => accrueSubscription(db, id, actor));
+      for (const id of await listPendingSubscriptionIds(pool, 'redeem_requested')) await withTransaction(pool, (db) => redeemSubscription(db, id, actor));
+      while ((await withTransaction(pool, (db) => matureAccruals(db, actor))) > 0);
+      for (const tokenId of await listReturnTokenIds(pool)) await withTransaction(pool, (db) => settlePayables(db, tokenId, actor));
     },
 
     /** A reversal the ledger refuses (e.g. the member already spent the cash) is recorded as failed, not retried forever. */
@@ -166,6 +191,8 @@ export function createHandlers(pool: pg.Pool, enqueue: Enqueue, env: NodeJS.Proc
         await enqueue('notifications.dispatch', {}, { singletonKey: 'notifications' });
         await enqueue('ops.maintenance', {}, { singletonKey: 'maintenance' });
       } else if (kind === 'medium') {
+        // Daily returns: accrual is per UTC day; member requests also enqueue this directly.
+        await enqueue('returns.process', {}, { singletonKey: 'returns' });
         const pools = await many<{ id: number }>(pool, "select id from public.investment_pools where status = 'active'");
         for (const p of pools) {
           await enqueue('trades.import', { poolId: Number(p.id) }, { singletonKey: `import:${p.id}` });

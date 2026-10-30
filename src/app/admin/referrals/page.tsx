@@ -4,7 +4,7 @@ import { webDb } from '@/server/db';
 import { pageStaff } from '@/server/http/auth';
 import { can } from '@/server/permissions';
 import { adminReferralRewards, adminReferrals, referralFundBalances, referralPolicyHistory, type AdminReferral } from '@/server/queries/admin';
-import { DEFAULT_TIERS, referralPolicy } from '@/server/referrals/rewards';
+import { DEFAULT_TIERS, describeReferralReward, referralPolicy } from '@/server/referrals/rewards';
 import { Badge, Button, Card, CardHeader, EmptyState, Input, Mono, Notice, PageHeader, Table, Td } from '@/components/ui/primitives';
 import { maybeOne } from '@/server/db-core';
 import { teamTree } from '@/server/referrals/network';
@@ -74,7 +74,7 @@ export default async function AdminReferralsPage({ searchParams }: { searchParam
         <Stat
           label="Program"
           value={policy?.params.enabled ? 'On' : 'Off'}
-          sub={policy ? `Policy v${policy.version} · ${policy.params.reward_amount} per qualified referral` : 'Not configured yet'}
+          sub={policy ? `Policy v${policy.version} · ${describeReferralReward(policy.params)} per qualified referral` : 'Not configured yet'}
         />
       </div>
 
@@ -117,6 +117,9 @@ export default async function AdminReferralsPage({ searchParams }: { searchParam
               <Td><Money value={r.amount_base} decimals={Number(r.decimals)} symbol={r.symbol} /></Td>
               <Td>
                 <ReferralRewardStatus status={r.status} />
+                {r.status === 'pending' || r.status === 'approved' ? (
+                  <p className="mt-1 text-xs text-fg-muted">{r.claimed_at ? 'Claimed by the member' : 'Not claimed yet: paid only after the member claims it'}</p>
+                ) : null}
                 {r.error ? <p className="mt-1 text-xs text-loss">{r.error}</p> : null}
                 {r.review_note ? <p className="mt-1 text-xs text-fg-muted">{r.review_note}</p> : null}
               </Td>
@@ -145,6 +148,7 @@ export default async function AdminReferralsPage({ searchParams }: { searchParam
             initial={{
               enabled: policy?.params.enabled ?? false,
               reward_amount: policy?.params.reward_amount ?? '0',
+              reward_bps: policy?.params.reward_bps,
               program_start: policy?.params.program_start ?? new Date().toISOString(),
               tiers: policy?.params.tiers ?? DEFAULT_TIERS,
             }}
@@ -161,7 +165,7 @@ export default async function AdminReferralsPage({ searchParams }: { searchParam
                   <Td className="text-fg-muted">{dateTime(h.created_at)}</Td>
                   <Td className="text-xs text-fg-muted">{h.created_by}</Td>
                   <Td>{h.params.enabled ? 'Yes' : 'No'}</Td>
-                  <Td>{String(h.params.reward_amount ?? '')}</Td>
+                  <Td>{typeof h.params.reward_bps === 'number' ? `${h.params.reward_bps / 100}%` : String(h.params.reward_amount ?? '')}</Td>
                   <Td className="text-fg-muted">{h.change_note}</Td>
                 </tr>
               ))}

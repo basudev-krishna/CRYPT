@@ -11,6 +11,7 @@ import { ReferralRewardStatus } from '@/components/ui/referral-stage';
 import { Stat } from '@/components/app/stat';
 import { pct, Progress, RewardsHeader, share, Usd } from '@/components/app/rewards-parts';
 import { dateTime } from '@/lib/format';
+import { ClaimRewardButton } from '@/components/app/actions';
 
 export const metadata: Metadata = { title: 'Matching bonus' };
 
@@ -127,17 +128,18 @@ export default async function MatchingPage() {
       <Card className="mt-6">
         <CardHeader
           title={`Matching rewards (${rewards.length})`}
-          subtitle="Calculated by the program from your team's operator-funded earnings. Only paid rewards are in your available balance."
+          subtitle="Calculated by the program from your team's operator-funded earnings and shown here first. Claim each one to have it paid to your available balance after approval."
         />
-        <Table head={['Recorded', 'Level', 'From', 'Amount', 'Status', 'Paid']} empty={rewards.length ? null : <EmptyState title="No matching rewards yet" />}>
+        <Table head={['Recorded', 'Level', 'From', 'Amount', 'Status', 'Paid', '']} empty={rewards.length ? null : <EmptyState title="No matching rewards yet" />}>
           {rewards.map((r) => (
             <tr key={r.id}>
               <Td className="text-fg-muted">{dateTime(r.created_at)}</Td>
               <Td>Level {r.level} ({pct(r.rate_bps ?? 0)})</Td>
               <Td>{r.source_code ? <Mono>{r.source_code}</Mono> : '—'}</Td>
               <Td><Money value={r.amount_base} decimals={Number(r.decimals)} symbol={r.symbol} /></Td>
-              <Td><ReferralRewardStatus status={r.status} /></Td>
+              <Td><ReferralRewardStatus status={r.status} claimed={Boolean(r.claimed_at)} /></Td>
               <Td className="text-fg-muted">{r.posted_at ? dateTime(r.posted_at) : '—'}</Td>
+              <Td>{!r.claimed_at && (r.status === 'pending' || r.status === 'approved') ? <ClaimRewardButton kind="program" rewardId={r.id} /> : null}</Td>
             </tr>
           ))}
         </Table>

@@ -366,3 +366,12 @@ export function MfaEnroll({ enrolled }: { enrolled: boolean }) {
     </div>
   );
 }
+
+/** Claim one of your own recorded rewards (referral commission, matching or rank). */
+export function ClaimRewardButton({ kind, rewardId }: { kind: 'referral' | 'program'; rewardId: string }) {
+  return (
+    <ActionButton url="/api/rewards/claim" body={{ kind, rewardId }} variant="primary" confirmText="Claim this reward? It is paid to your available balance once approved.">
+      Claim
+    </ActionButton>
+  );
+}

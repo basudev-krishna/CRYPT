@@ -19,7 +19,12 @@ export type AccountPurpose =
   | 'network_fee_expense'
   | 'owner_equity'
   | 'referral_reward_fund'
-  | 'operator_float';
+  | 'operator_float'
+  | 'plan_principal'
+  | 'return_accrued'
+  | 'return_payable'
+  | 'return_reserve'
+  | 'return_cost';
 
 export type Direction = 'D' | 'C';
 

@@ -15,7 +15,7 @@
  * withdrawn. One reward per referred member, ever (unique in the database).
  */
 import { many, maybeOne, one, type Db } from '../db-core';
-import { parseBase, parseUnits } from '@/lib/money';
+import { mulDivDown, parseBase, parseUnits } from '@/lib/money';
 import { ensureAccount, lockBalance, postEntry, transfer } from '../ledger/ledger';
 import { getToken } from '../chains/registry';
 import { currentPolicy, isControlEnabled, isSoleAdmin, notify, raiseRiskEvent, recordAudit, type Actor, type ReferralPolicy, type VersionedPolicy } from '../ops';
@@ -58,6 +58,21 @@ export function referralTier(qualified: number, tiers: ReferralPolicy['tiers']):
   return { current, next, remaining: next ? next.min_qualified - qualified : 0 };
 }
 
+/**
+ * The reward for one qualified referral, in token base units: a share of the
+ * referred member's first credited deposit when the policy sets reward_bps
+ * (rounded down), otherwise the fixed reward_amount.
+ */
+export function referralRewardAmount(params: Pick<ReferralPolicy, 'reward_amount' | 'reward_bps'>, firstDepositBase: bigint, decimals: number): bigint {
+  if (params.reward_bps !== undefined) return mulDivDown(firstDepositBase, BigInt(params.reward_bps), 10_000n);
+  return parseUnits(params.reward_amount, decimals);
+}
+
+/** A short description of the reward, e.g. "5% of their first deposit" or "10 USDT". */
+export function describeReferralReward(params: Pick<ReferralPolicy, 'reward_amount' | 'reward_bps'>): string {
+  return params.reward_bps !== undefined ? `${params.reward_bps / 100}% of their first deposit` : `${params.reward_amount} USDT`;
+}
+
 /** The current referral policy, or null if none was ever saved (the program is then off). */
 export async function referralPolicy(db: Db): Promise<VersionedPolicy<ReferralPolicy> | null> {
   const exists = await maybeOne(db, "select 1 from public.policy_versions where kind = 'referral' and effective_from <= now() limit 1");
@@ -67,7 +82,7 @@ export async function referralPolicy(db: Db): Promise<VersionedPolicy<ReferralPo
 /** Save a new referral policy version. Policies are never edited in place. */
 export async function saveReferralPolicy(db: Db, actor: Actor, params: ReferralPolicy, note: string): Promise<{ version: number }> {
   if (note.trim().length < MIN_NOTE) throw new ReferralRewardError(`A note of at least ${MIN_NOTE} characters is required`, 'note_required');
-  if (parseUnits(params.reward_amount, 18) <= 0n && params.enabled) throw new ReferralRewardError('The reward amount must be positive', 'invalid_amount');
+  if (params.reward_bps === undefined && parseUnits(params.reward_amount, 18) <= 0n && params.enabled) throw new ReferralRewardError('The reward amount must be positive', 'invalid_amount');
   // Serialize concurrent saves so version numbers stay unique and gapless.
   await db.query("select pg_advisory_xact_lock(hashtext('policy:referral'))");
   const previous = await referralPolicy(db);
@@ -93,13 +108,13 @@ export async function saveReferralPolicy(db: Db, actor: Actor, params: ReferralP
 export async function detectReferralRewards(db: Db): Promise<number> {
   const policy = await referralPolicy(db);
   if (!policy?.params.enabled) return 0;
-  const candidates = await many<{ referred: string; sponsor: string; token_id: number; credited_at: Date }>(
+  const candidates = await many<{ referred: string; sponsor: string; token_id: number; credited_at: Date; amount_base: string }>(
     db,
-    `select p.user_id as referred, p.sponsor_user_id as sponsor, d.token_id, d.credited_at
+    `select p.user_id as referred, p.sponsor_user_id as sponsor, d.token_id, d.credited_at, d.amount_base::text as amount_base
        from public.user_profiles p
        join public.user_profiles s on s.user_id = p.sponsor_user_id
        cross join lateral (
-         select token_id, credited_at from public.deposits
+         select token_id, credited_at, amount_base from public.deposits
           where user_id = p.user_id and status = 'credited' and token_id is not null
           order by credited_at, id limit 1
        ) d
@@ -113,7 +128,8 @@ export async function detectReferralRewards(db: Db): Promise<number> {
   let created = 0;
   for (const c of candidates) {
     const token = await getToken(db, Number(c.token_id));
-    const amount = parseUnits(policy.params.reward_amount, token.decimals);
+    const amount = referralRewardAmount(policy.params, parseBase(c.amount_base), token.decimals);
+    if (amount <= 0n) continue;
     const res = await db.query(
       `insert into public.referral_rewards (referred_user_id, sponsor_user_id, token_id, amount_base, policy_version_id, qualified_at)
        values ($1, $2, $3, $4, $5, $6) on conflict (referred_user_id) do nothing`,
@@ -194,6 +210,8 @@ export async function postReferralReward(db: Db, rewardId: string, actor: Actor)
     return 'deferred';
   };
   if (await isControlEnabled(db, 'allocations_paused')) return 'deferred';
+  // Paid only once the referrer has claimed it.
+  if (!(await one<{ c: boolean }>(db, `select ${CLAIMED_SQL('r')} is not null as c from public.referral_rewards r where r.id = $1`, [r.id])).c) return 'deferred';
   const sponsor = await one<{ account_status: string }>(db, 'select account_status from public.user_profiles where user_id = $1', [r.sponsor_user_id]);
   if (sponsor.account_status !== 'active') return hold(`sponsor account is ${sponsor.account_status}`);
 
@@ -219,5 +237,157 @@ export async function postReferralReward(db: Db, rewardId: string, actor: Actor)
 }
 
 export async function listApprovedReferralRewardIds(db: Db): Promise<string[]> {
-  return (await many<{ id: string }>(db, "select id from public.referral_rewards where status = 'approved' order by reviewed_at limit 100")).map((r) => r.id);
+  return (await many<{ id: string }>(db, `select r.id from public.referral_rewards r where r.status = 'approved' and ${CLAIMED_SQL('r')} is not null order by r.reviewed_at limit 100`)).map((r) => r.id);
+}
+
+
+/** Read through jsonb so this works before the claims migration is applied. */
+const CLAIMED_SQL = (alias: string) => `(to_jsonb(${alias}) ->> 'claimed_at')`;
+
+/**
+ * The referrer claims their recorded commission. Rewards are shown first and
+ * paid only after the owner claims them (and an administrator approves).
+ * Claiming twice is harmless; only the owner can claim, and only an open reward.
+ */
+export async function claimReferralReward(db: Db, args: { userId: string; rewardId: string; actor: Actor }): Promise<void> {
+  const r = await maybeOne<{ id: string; status: string; claimed: string | null; amount_base: string }>(
+    db,
+    `select r.id, r.status, ${CLAIMED_SQL('r')} as claimed, r.amount_base::text from public.referral_rewards r where r.id = $1 and r.sponsor_user_id = $2 for update`,
+    [args.rewardId, args.userId],
+  );
+  if (!r) throw new ReferralRewardError('Reward not found', 'not_found');
+  if (r.claimed) return;
+  if (r.status !== 'pending' && r.status !== 'approved') throw new ReferralRewardError(`This reward is ${r.status} and cannot be claimed`, 'not_claimable');
+  await db.query('update public.referral_rewards set claimed_at = now() where id = $1', [r.id]);
+  await recordAudit(db, args.actor, 'referral_reward.claimed', { type: 'referral_reward', id: r.id }, { amountBase: r.amount_base });
+  await notify(db, { audience: 'operations', kind: 'reward_claimed', payload: { rewardId: r.id, kind: 'referral' }, dedupeKey: `reward_claimed:referral:${r.id}` });
+}
+
+export type RecordedRewardStatus = 'pending' | 'approved' | 'rejected' | 'posted' | 'cancelled';
+/**
+ * Where a referral's commission stands, for the member's own view:
+ * a recorded reward's status, or 'earned' (qualified under the current policy,
+ * not yet recorded by the worker), 'no_deposit', 'not_eligible' (joined before
+ * the program start, or an account is not active) or 'program_off'.
+ */
+export type CommissionStatus = RecordedRewardStatus | 'earned' | 'no_deposit' | 'not_eligible' | 'program_off';
+
+/** Pure: the status of one referral's commission (mirrors detectReferralRewards). */
+export function commissionStatus(args: {
+  recorded: RecordedRewardStatus | null;
+  hasDeposit: boolean;
+  programOn: boolean;
+  joinedAt: Date;
+  programStart: string | null;
+  referredActive: boolean;
+  sponsorActive: boolean;
+}): CommissionStatus {
+  if (args.recorded) return args.recorded;
+  if (!args.programOn || !args.programStart) return 'program_off';
+  if (!args.hasDeposit) return 'no_deposit';
+  if (!args.referredActive || !args.sponsorActive || args.joinedAt < new Date(args.programStart)) return 'not_eligible';
+  return 'earned';
+}
+
+export interface CommissionView {
+  memberCode: string;
+  joinedAt: Date;
+  firstDeposit: { amountBase: string; decimals: number; symbol: string; creditedAt: Date } | null;
+  /** The recorded reward, or what the current policy pays for it; null when nothing is due. */
+  commissionBase: bigint | null;
+  decimals: number;
+  symbol: string;
+  status: CommissionStatus;
+  postedAt: Date | null;
+  /** The recorded reward, so the referrer can claim it. */
+  rewardId: string | null;
+  claimedAt: string | null;
+}
+
+/**
+ * Every member `sponsorId` referred, with their first credited deposit and the
+ * commission it earns, shown as soon as it is earned (before the worker
+ * records it), so the referrer can follow it through approval to payment.
+ */
+export async function referralCommissions(db: Db, sponsorId: string): Promise<CommissionView[]> {
+  const policy = await referralPolicy(db);
+  const program = policy?.params.enabled ? policy.params : null;
+  const rows = await many<{
+    member_code: string;
+    created_at: Date;
+    referred_status: string;
+    sponsor_status: string;
+    dep_amount: string | null;
+    dep_decimals: number | null;
+    dep_symbol: string | null;
+    credited_at: Date | null;
+    r_status: RecordedRewardStatus | null;
+    r_amount: string | null;
+    r_decimals: number | null;
+    r_symbol: string | null;
+    posted_at: Date | null;
+    r_id: string | null;
+    claimed_at: string | null;
+  }>(
+    db,
+    `select p.member_code, p.created_at, p.account_status::text as referred_status, s.account_status::text as sponsor_status,
+            d.amount_base::text as dep_amount, dt.decimals as dep_decimals, dt.symbol as dep_symbol, d.credited_at,
+            r.status::text as r_status, r.amount_base::text as r_amount, rt.decimals as r_decimals, rt.symbol as r_symbol, r.posted_at,
+            r.id as r_id, ${CLAIMED_SQL('r')} as claimed_at
+       from public.user_profiles p
+       join public.user_profiles s on s.user_id = p.sponsor_user_id
+       left join lateral (
+         select token_id, amount_base, credited_at from public.deposits
+          where user_id = p.user_id and status = 'credited' and token_id is not null
+          order by credited_at, id limit 1
+       ) d on true
+       left join public.supported_tokens dt on dt.id = d.token_id
+       left join public.referral_rewards r on r.referred_user_id = p.user_id
+       left join public.supported_tokens rt on rt.id = r.token_id
+      where p.sponsor_user_id = $1 and p.user_id <> $1
+      order by p.created_at desc`,
+    [sponsorId],
+  );
+  return rows.map((r) => {
+    const firstDeposit =
+      r.dep_amount !== null && r.dep_decimals !== null
+        ? { amountBase: r.dep_amount, decimals: Number(r.dep_decimals), symbol: r.dep_symbol ?? 'USDT', creditedAt: r.credited_at! }
+        : null;
+    const status = commissionStatus({
+      recorded: r.r_status,
+      hasDeposit: firstDeposit !== null,
+      programOn: program !== null,
+      joinedAt: new Date(r.created_at),
+      programStart: program?.program_start ?? null,
+      referredActive: r.referred_status === 'active',
+      sponsorActive: r.sponsor_status === 'active',
+    });
+    if (r.r_amount !== null) {
+      return {
+        memberCode: r.member_code,
+        joinedAt: r.created_at,
+        firstDeposit,
+        commissionBase: parseBase(r.r_amount),
+        decimals: Number(r.r_decimals),
+        symbol: r.r_symbol ?? 'USDT',
+        status,
+        postedAt: r.posted_at,
+        rewardId: r.r_id,
+        claimedAt: r.claimed_at,
+      };
+    }
+    const due = status === 'earned' && program && firstDeposit ? referralRewardAmount(program, parseBase(firstDeposit.amountBase), firstDeposit.decimals) : null;
+    return {
+      memberCode: r.member_code,
+      joinedAt: r.created_at,
+      firstDeposit,
+      commissionBase: due,
+      decimals: firstDeposit?.decimals ?? 18,
+      symbol: firstDeposit?.symbol ?? 'USDT',
+      status,
+      postedAt: null,
+      rewardId: null,
+      claimedAt: null,
+    };
+  });
 }

@@ -21,6 +21,7 @@ import type { ChainAdapter } from '../chains/types';
 import type { CustodyProvider } from '../custody/types';
 import type { TradingVenue } from '../trading/types';
 import { fixedToBase } from '../investment/pnl';
+import { obligationInvariant } from '../returns/service';
 import { isControlEnabled, notify, raiseRiskEvent, recordAudit, serviceActor, setControl, bigintReplacer } from '../ops';
 
 export interface ReconCheck {
@@ -125,7 +126,8 @@ export async function runReconciliation(pool: pg.Pool, deps: ReconDeps, triggere
         (await balanceByPurpose(pool, 'user_reserved', token.id)) +
         (await balanceByPurpose(pool, 'user_pending_subscription', token.id)) +
         (await balanceByPurpose(pool, 'pool_investor_equity', token.id)) +
-        (await balanceByPurpose(pool, 'suspense_deposits', token.id));
+        (await balanceByPurpose(pool, 'suspense_deposits', token.id)) +
+        (await balanceByPurpose(pool, 'plan_principal', token.id));
       const poolAssets = await balanceByPurpose(pool, 'pool_assets', token.id);
       const assets = ledgerTreasury + poolAssets;
       checks.push({
@@ -134,6 +136,26 @@ export async function runReconciliation(pool: pg.Pool, deps: ReconDeps, triggere
         status: assets >= liabilities ? 'ok' : 'fail',
         blocking: true,
         detail: { assets: assets.toString(), customerLiabilities: liabilities.toString(), surplus: (assets - liabilities).toString() },
+      });
+
+      // Daily returns: the unfunded cost must equal what members are owed (blocking),
+      // and payable returns should be covered by the revenue reserve (warning: payouts just wait).
+      const obligations = await obligationInvariant(pool, token.id);
+      checks.push({
+        name: 'return_obligations',
+        scope,
+        status: obligations.ok ? 'ok' : 'fail',
+        blocking: true,
+        detail: { returnCost: obligations.cost.toString(), accruedPlusPayable: obligations.owed.toString() },
+      });
+      const payable = await balanceByPurpose(pool, 'return_payable', token.id);
+      const reserve = await balanceByPurpose(pool, 'return_reserve', token.id);
+      checks.push({
+        name: 'return_coverage',
+        scope,
+        status: reserve >= payable ? 'ok' : 'warn',
+        blocking: false,
+        detail: { payable: payable.toString(), revenueReserve: reserve.toString(), shortfall: (payable > reserve ? payable - reserve : 0n).toString() },
       });
 
       await pool.query(

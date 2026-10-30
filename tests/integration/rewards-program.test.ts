@@ -86,7 +86,11 @@ const matchingOn = (min = '0', extra: Partial<RewardsProgram['matching']> = {}) 
 
 const review = (rewardId: string, decision: 'approve' | 'reject' = 'approve', staffUserId = adminId) =>
   withTransaction(web, (db) => reviewProgramReward(db, { rewardId, decision, note: 'Checked the calculation by hand', staffUserId, actor: { type: 'staff', id: staffUserId } }));
-const post = (id: string) => withTransaction(worker, (db) => postProgramReward(db, id, service));
+/** The member's claim, which payment waits for (set directly; claim rules are tested in referrals.test.ts). */
+const post = async (id: string) => {
+  await admin.query("update public.program_rewards set claimed_at = now() where id = $1 and claimed_at is null and status in ('pending', 'approved')", [id]);
+  return withTransaction(worker, (db) => postProgramReward(db, id, service));
+};
 const detect = () => withTransaction(worker, (db) => detectMatchingRewards(db));
 const rewards = () =>
   many<{ id: string; kind: string; beneficiary_user_id: string; level: number | null; amount_base: string; status: string; rank_code: string | null; error: string | null }>(

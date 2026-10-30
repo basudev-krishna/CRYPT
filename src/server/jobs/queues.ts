@@ -12,6 +12,7 @@ export const QUEUES = {
   correctionPost: 'correction.post',
   referralRewards: 'referral.rewards',
   adjustmentPost: 'adjustment.post',
+  returnsProcess: 'returns.process',
   treasurySweep: 'treasury.sweep',
   tradesImport: 'trades.import',
   valuationRun: 'valuation.run',
@@ -34,6 +35,7 @@ export interface JobPayloads {
   'correction.post': { correctionId: string };
   'referral.rewards': Record<string, never>;
   'adjustment.post': { adjustmentId: string };
+  'returns.process': Record<string, never>;
   'treasury.sweep': { networkId: number };
   'trades.import': { poolId: number };
   'valuation.run': { poolId: number };

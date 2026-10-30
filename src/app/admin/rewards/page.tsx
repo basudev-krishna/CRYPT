@@ -136,6 +136,9 @@ export default async function RewardTreasuryPage() {
               <Td><Money value={r.amount_base} decimals={Number(r.decimals)} symbol={r.symbol} /></Td>
               <Td>
                 <ReferralRewardStatus status={r.status} />
+                {r.status === 'pending' || r.status === 'approved' ? (
+                  <p className="mt-1 text-xs text-fg-muted">{r.claimed_at ? 'Claimed by the member' : 'Not claimed yet: paid only after the member claims it'}</p>
+                ) : null}
                 {r.error ? <p className="mt-1 text-xs text-loss">{r.error}</p> : null}
                 {r.review_note ? <p className="mt-1 text-xs text-fg-muted">{r.review_note}</p> : null}
               </Td>

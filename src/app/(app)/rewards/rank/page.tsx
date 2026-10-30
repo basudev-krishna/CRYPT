@@ -10,6 +10,7 @@ import { ReferralRewardStatus } from '@/components/ui/referral-stage';
 import { Stat } from '@/components/app/stat';
 import { Progress, RewardsHeader, Usd } from '@/components/app/rewards-parts';
 import { dateTime } from '@/lib/format';
+import { ClaimRewardButton } from '@/components/app/actions';
 
 export const metadata: Metadata = { title: 'Rank' };
 
@@ -104,15 +105,16 @@ export default async function RankPage() {
       </Card>
 
       <Card className="mt-6">
-        <CardHeader title={`Rank rewards (${rewards.length})`} subtitle="Only paid rewards are in your available balance." />
-        <Table head={['Recorded', 'Rank', 'Amount', 'Status', 'Paid']} empty={rewards.length ? null : <EmptyState title="No rank rewards yet" />}>
+        <CardHeader title={`Rank rewards (${rewards.length})`} subtitle="Shown here first; claim each one to have it paid to your available balance after approval." />
+        <Table head={['Recorded', 'Rank', 'Amount', 'Status', 'Paid', '']} empty={rewards.length ? null : <EmptyState title="No rank rewards yet" />}>
           {rewards.map((r) => (
             <tr key={r.id}>
               <Td className="text-fg-muted">{dateTime(r.created_at)}</Td>
               <Td>Rank {r.rank_code}</Td>
               <Td><Money value={r.amount_base} decimals={Number(r.decimals)} symbol={r.symbol} /></Td>
-              <Td><ReferralRewardStatus status={r.status} /></Td>
+              <Td><ReferralRewardStatus status={r.status} claimed={Boolean(r.claimed_at)} /></Td>
               <Td className="text-fg-muted">{r.posted_at ? dateTime(r.posted_at) : '—'}</Td>
+              <Td>{!r.claimed_at && (r.status === 'pending' || r.status === 'approved') ? <ClaimRewardButton kind="program" rewardId={r.id} /> : null}</Td>
             </tr>
           ))}
         </Table>

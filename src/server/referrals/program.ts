@@ -359,6 +359,8 @@ export async function postProgramReward(db: Db, rewardId: string, actor: Actor):
     return 'deferred';
   };
   if (await isControlEnabled(db, 'allocations_paused')) return 'deferred';
+  // Paid only once the member has claimed it.
+  if (!(await one<{ c: boolean }>(db, `select ${PROGRAM_CLAIMED_SQL} is not null as c from public.program_rewards r where r.id = $1`, [r.id])).c) return 'deferred';
   if (r.source_entry_id && (await one<{ v: boolean }>(db, `select ${reversedSql('$1::bigint')} as v`, [r.source_entry_id])).v) {
     await db.query("update public.program_rewards set status = 'cancelled', error = 'the matched earning was reversed' where id = $1", [r.id]);
     await recordAudit(db, actor, 'program.reward_cancelled', { type: 'program_reward', id: r.id }, { reason: 'source reversed' });
@@ -390,7 +392,7 @@ export async function postProgramReward(db: Db, rewardId: string, actor: Actor):
 }
 
 export async function listApprovedProgramRewardIds(db: Db): Promise<string[]> {
-  return (await many<{ id: string }>(db, "select id from public.program_rewards where status = 'approved' order by reviewed_at limit 100")).map((r) => r.id);
+  return (await many<{ id: string }>(db, `select r.id from public.program_rewards r where r.status = 'approved' and ${PROGRAM_CLAIMED_SQL} is not null order by r.reviewed_at limit 100`)).map((r) => r.id);
 }
 
 // -----------------------------------------------------------------------------
@@ -427,6 +429,28 @@ export async function placementAvailability(db: Db, referralCode: string): Promi
 // -----------------------------------------------------------------------------
 // Read models
 // -----------------------------------------------------------------------------
+
+/** Read through jsonb so this works before the claims migration is applied. */
+const PROGRAM_CLAIMED_SQL = `(to_jsonb(r) ->> 'claimed_at')`;
+
+/**
+ * The member claims their recorded matching or rank reward. It is paid only
+ * after the owner claims it and an administrator approves it, in either order.
+ */
+export async function claimProgramReward(db: Db, args: { userId: string; rewardId: string; actor: Actor }): Promise<void> {
+  const r = await maybeOne<{ id: string; status: string; claimed: string | null; amount_base: string; kind: string }>(
+    db,
+    `select r.id, r.status, ${PROGRAM_CLAIMED_SQL} as claimed, r.amount_base::text, r.kind from public.program_rewards r where r.id = $1 and r.beneficiary_user_id = $2 for update`,
+    [args.rewardId, args.userId],
+  );
+  if (!r) throw new ProgramRewardError('Reward not found', 'not_found');
+  if (r.claimed) return;
+  if (r.status !== 'pending' && r.status !== 'approved') throw new ProgramRewardError(`This reward is ${r.status} and cannot be claimed`, 'not_claimable');
+  await db.query('update public.program_rewards set claimed_at = now() where id = $1', [r.id]);
+  await recordAudit(db, args.actor, 'program.reward_claimed', { type: 'program_reward', id: r.id }, { kind: r.kind, amountBase: r.amount_base });
+  await notify(db, { audience: 'operations', kind: 'reward_claimed', payload: { rewardId: r.id, kind: r.kind }, dedupeKey: `reward_claimed:program:${r.id}` });
+}
+
 export interface ProgramRewardView {
   id: string;
   kind: 'matching' | 'rank';
@@ -443,10 +467,11 @@ export interface ProgramRewardView {
   created_at: Date;
   posted_at: Date | null;
   entry_id: string | null;
+  claimed_at: string | null;
 }
 
 const REWARD_COLUMNS = `r.id, r.kind, r.amount_base::text, t.symbol, t.decimals, r.level, r.rate_bps, r.base_amount::text, r.rank_code,
-  s.member_code as source_code, r.status, r.error, r.created_at, r.posted_at, r.entry_id::text`;
+  s.member_code as source_code, r.status, r.error, r.created_at, r.posted_at, r.entry_id::text, (to_jsonb(r) ->> 'claimed_at') as claimed_at`;
 
 export async function listProgramRewards(db: Db, userId: string): Promise<ProgramRewardView[]> {
   return many<ProgramRewardView>(

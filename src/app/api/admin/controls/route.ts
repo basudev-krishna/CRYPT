@@ -7,7 +7,7 @@ import { isSoleAdmin, raiseRiskEvent, setControl } from '@/server/ops';
 import { canResume } from '@/server/permissions';
 
 const schema = z.object({
-  key: z.enum(['withdrawals_paused', 'deposits_paused', 'allocations_paused']),
+  key: z.enum(['withdrawals_paused', 'deposits_paused', 'allocations_paused', 'return_accruals_paused', 'return_settlements_paused']),
   enabled: z.boolean(),
   reason: z.string().trim().min(10).max(500),
 });

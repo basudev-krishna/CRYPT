@@ -5,6 +5,7 @@
  *   allocate (worker):  D suspense_deposits (receipt amount)  C user_cash (one line per member)
  *   referral fund:      D suspense_deposits (receipt amount)  C referral_reward_fund (operator money)
  *   operator float:     D suspense_deposits (receipt amount)  C operator_float (backs manual adjustments)
+ *   business revenue:   D suspense_deposits (receipt amount)  C return_reserve (the only money daily returns are paid from)
  *   correct  (worker):  ledger.reverse_entry of the deposit's credit entry, back into suspense
  *
  * An allocation must spend an unattributed receipt that is already received into
@@ -72,10 +73,44 @@ export interface AllocationLineInput {
   amount: string; // decimal string as entered
 }
 
-export type AllocationKind = 'assignment' | 'distribution' | 'referral_fund' | 'operator_float';
+export type AllocationKind = 'assignment' | 'distribution' | 'referral_fund' | 'operator_float' | 'business_revenue';
 
 /** Operator top-ups: the whole receipt goes to one operator account, with no member lines. */
-const FUND_PURPOSE = { referral_fund: 'referral_reward_fund', operator_float: 'operator_float' } as const;
+const FUND_PURPOSE = { referral_fund: 'referral_reward_fund', operator_float: 'operator_float', business_revenue: 'return_reserve' } as const;
+
+/** Where business revenue came from; required for kind 'business_revenue' and kept immutable. */
+export interface RevenueDetails {
+  businessLine: string;
+  periodStart: string; // YYYY-MM-DD
+  periodEnd: string;
+  evidenceReference: string;
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function invalidRevenue(r: RevenueDetails | undefined): string | null {
+  if (!r) return 'Business revenue needs its business line, period and evidence reference';
+  if (r.businessLine.trim().length < 3) return 'Name the business line the revenue came from';
+  if (!DATE_RE.test(r.periodStart) || !DATE_RE.test(r.periodEnd) || r.periodEnd < r.periodStart) return 'Enter a valid revenue period';
+  if (r.evidenceReference.trim().length < 5) return 'Reference the evidence for this revenue (invoice, statement, contract)';
+  return null;
+}
+
+/**
+ * Revenue must not be a participant's money relabelled. Refuse a receipt whose
+ * sender is a member's registered wallet, or has funded a member's deposit before.
+ */
+async function senderIsMember(db: Db, depositId: string): Promise<boolean> {
+  const r = await one<{ member: boolean }>(
+    db,
+    `select exists (select 1 from public.member_wallets w where w.network_id = c.network_id and w.address = lower(c.from_address) and w.status = 'active')
+         or exists (select 1 from public.deposits o join public.chain_transactions oc on oc.id = o.chain_transaction_id
+                     where oc.network_id = c.network_id and lower(oc.from_address) = lower(c.from_address) and o.id <> d.id and o.user_id is not null) as member
+       from public.deposits d join public.chain_transactions c on c.id = d.chain_transaction_id where d.id = $1`,
+    [depositId],
+  );
+  return r.member;
+}
 const isFundKind = (k: AllocationKind): k is keyof typeof FUND_PURPOSE => k in FUND_PURPOSE;
 
 /**
@@ -96,7 +131,7 @@ export function validateSplit(kind: AllocationKind, receipt: bigint, lines: { us
 
 export async function createAllocation(
   db: Db,
-  args: { depositId: string; kind: AllocationKind; reason: string; lines: AllocationLineInput[]; staffUserId: string; actor: Actor },
+  args: { depositId: string; kind: AllocationKind; reason: string; lines: AllocationLineInput[]; revenue?: RevenueDetails; staffUserId: string; actor: Actor },
 ): Promise<{ id: string }> {
   const reason = args.reason.trim();
   if (reason.length < MIN_REASON) throw new AllocationError(`A reason of at least ${MIN_REASON} characters is required`, 'reason_required');
@@ -114,6 +149,13 @@ export async function createAllocation(
   for (const l of lines) {
     if ((await getAccountStatus(db, l.userId)) !== 'active') throw new AllocationError('Every recipient must be an active member', 'recipient_not_active');
   }
+  if (args.kind === 'business_revenue') {
+    const problem = invalidRevenue(args.revenue);
+    if (problem) throw new AllocationError(problem, 'revenue_details_required');
+    if (await senderIsMember(db, d.id)) {
+      throw new AllocationError('This receipt came from a member wallet, so it cannot be recorded as business revenue', 'revenue_from_member');
+    }
+  }
 
   const row = await one<{ id: string }>(
     db,
@@ -122,6 +164,13 @@ export async function createAllocation(
   );
   for (const l of lines) {
     await db.query('insert into public.allocation_lines (allocation_id, user_id, amount_base) values ($1, $2, $3)', [row.id, l.userId, l.amount.toString()]);
+  }
+  if (args.kind === 'business_revenue' && args.revenue) {
+    await db.query(
+      `insert into public.business_revenue_records (allocation_id, business_line, period_start, period_end, evidence_reference, created_by)
+       values ($1, $2, $3, $4, $5, $6)`,
+      [row.id, args.revenue.businessLine.trim(), args.revenue.periodStart, args.revenue.periodEnd, args.revenue.evidenceReference.trim(), args.staffUserId],
+    );
   }
   const toSelf = lines.some((l) => l.userId === args.staffUserId);
   const details = { depositId: d.id, kind: args.kind, reason, recipients: lines.length, amountBase: d.amount_base, toSelf };
@@ -175,6 +224,7 @@ export async function postAllocation(db: Db, allocationId: string, actor: Actor)
     distribution: 'Distribution by administrator',
     referral_fund: 'Referral reward fund top-up',
     operator_float: 'Operator float top-up',
+    business_revenue: 'Business revenue set aside for daily returns',
   }[kind];
   const entryId = await postEntry(db, {
     idempotencyKey: `allocation:${a.id}`,

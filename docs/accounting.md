@@ -30,6 +30,10 @@ Each account has a purpose, a token, and an optional user or pool scope (`ledger
 | `fee_revenue`, `network_fee_expense`, `owner_equity` | revenue / expense / equity | platform accounts |
 | `referral_reward_fund` | liability | operator money set aside for referral rewards; may never go negative |
 | `operator_float` | liability | operator money backing manual adjustments; may never go negative |
+| `plan_principal` | liability | member capital committed to a fixed daily-return plan (counted in solvency) |
+| `return_accrued`, `return_payable` | liability | daily returns accrued / now due; promises, never withdrawable |
+| `return_reserve` | liability | business revenue set aside for daily returns; may never go negative |
+| `return_cost` | expense | accrued returns not yet funded; always equals accrued + payable |
 
 Customer-owned purposes may never go negative. The `ledger.apply_line` trigger enforces this inside the posting transaction.
 
@@ -72,6 +76,13 @@ Distinct customer figures:
 | Operator float top-up (operator receipt allocated by admin) | D `suspense_deposits` / C `operator_float` |
 | Manual credit (member paid the admin personally) | D `operator_float` / C `user_cash` |
 | Manual debit (admin paid the member personally) | D `user_cash` / C `operator_float` |
+| Daily-return plan subscribed / principal returned | D `user_cash` / C `plan_principal`, and the reverse |
+| Daily return accrued (one per subscription and UTC day) | D `return_cost` / C `return_accrued` |
+| Daily return becomes due | D `return_accrued` / C `return_payable` |
+| Business revenue recorded (allocation `business_revenue`) | D `suspense_deposits` / C `return_reserve` |
+| Daily return settled from revenue | D `return_payable` / C `user_cash` and D `return_reserve` / C `return_cost` |
+
+Fixed daily returns are specified in [`daily-returns.md`](daily-returns.md), including the decisions that still need approval.
 
 Deposits, subscriptions, redemptions and withdrawals are **capital flows**. They never pass through mark-to-market, so they never show up as investment profit or loss (`tests/integration/valuation-scenarios.test.ts`).
 

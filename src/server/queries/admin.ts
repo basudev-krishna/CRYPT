@@ -419,9 +419,10 @@ export async function adminReferralRewards(db: Db, limit = 200) {
     posted_at: Date | null;
     error: string | null;
     policy_version: number;
+    claimed_at: string | null;
   }>(
     db,
-    `select r.id, r.status, r.amount_base::text, t.symbol, t.decimals, r.sponsor_user_id, s.email as sponsor_email, s.member_code as sponsor_code,
+    `select r.id, r.status, r.amount_base::text, t.symbol, t.decimals, (to_jsonb(r) ->> 'claimed_at') as claimed_at, r.sponsor_user_id, s.email as sponsor_email, s.member_code as sponsor_code,
             p.email as referred_email, p.member_code as referred_code, r.qualified_at, r.created_at, r.review_note, r.reviewed_at, r.posted_at, r.error,
             v.version as policy_version
        from public.referral_rewards r

@@ -56,7 +56,7 @@ export async function notify(
   );
 }
 
-export type ControlKey = 'withdrawals_paused' | 'deposits_paused' | 'allocations_paused';
+export type ControlKey = 'withdrawals_paused' | 'deposits_paused' | 'allocations_paused' | 'return_accruals_paused' | 'return_settlements_paused';
 
 export async function isControlEnabled(db: Db, key: ControlKey): Promise<boolean> {
   const row = await maybeOne<{ enabled: boolean }>(db, 'select enabled from public.system_controls where key = $1', [key]);
@@ -128,6 +128,12 @@ export const referralPolicySchema = z.object({
   enabled: z.boolean(),
   // At most 6 decimals, so the amount fits every supported stablecoin.
   reward_amount: z.string().regex(/^\d{1,12}(\.\d{1,6})?$/, 'Use at most 6 decimal places'),
+  /**
+   * When set, the reward is this share (basis points, 500 = 5%) of the referred
+   * member's first credited deposit instead of the fixed reward_amount. Still
+   * one reward per referred member, paid from the operator's referral fund.
+   */
+  reward_bps: z.number().int().min(1).max(10_000).optional(),
   program_start: z.iso.datetime({ offset: true }),
   tiers: z
     .array(z.object({ label: z.string().regex(/^[A-Za-z0-9 ]{1,16}$/), min_qualified: z.number().int().positive() }))
