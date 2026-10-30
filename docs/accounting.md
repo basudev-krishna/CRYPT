@@ -81,6 +81,7 @@ Distinct customer figures:
 | Daily return becomes due | D `return_accrued` / C `return_payable` |
 | Business revenue recorded (allocation `business_revenue`) | D `suspense_deposits` / C `return_reserve` |
 | Daily return settled from revenue | D `return_payable` / C `user_cash` and D `return_reserve` / C `return_cost` |
+| Daily return paid offline by the team (offline plans only) | D `return_payable` / C `return_cost` (offline principal itself stays off the ledger) |
 
 Fixed daily returns are specified in [`daily-returns.md`](daily-returns.md), including the decisions that still need approval.
 

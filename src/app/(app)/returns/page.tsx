@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic';
 
 const ACCRUAL_STATUS = {
   accrued: { tone: 'neutral', label: 'Accrued, not yet due' },
-  payable: { tone: 'warn', label: 'Due, awaiting company revenue' },
+  payable: { tone: 'warn', label: 'Due, not yet paid' },
   settled: { tone: 'success', label: 'Credited to available balance' },
 } as const;
 
@@ -53,12 +53,18 @@ export default async function ReturnsPage() {
         description="A plan pays a fixed daily rate on your principal under its written terms. This is the company's promise, not trading profit. It is paid only from company revenue. Accrued and due returns are not money in your balance until they are credited."
       />
 
-      <div className="grid gap-6 md:grid-cols-3 xl:grid-cols-5">
-        <Stat label="Principal" value={t ? <Money value={t.principal} decimals={Number(t.decimals)} symbol={t.symbol} /> : '—'} emphasis />
+      <div className="grid gap-6 md:grid-cols-3 xl:grid-cols-6">
+        <Stat
+          label="Principal"
+          value={t ? <Money value={BigInt(t.principal) + BigInt(t.offline_principal)} decimals={Number(t.decimals)} symbol={t.symbol} /> : '—'}
+          emphasis
+          sub={t && BigInt(t.offline_principal) > 0n ? `Includes ${fmt(t.offline_principal, Number(t.decimals))} handed to the team offline` : undefined}
+        />
         <Stat label="Daily return" value={t ? <Money value={t.daily} decimals={Number(t.decimals)} symbol={t.symbol} maxFraction={4} /> : '—'} sub="Accrued each UTC day" />
         <Stat label="Accrued" value={t ? <Money value={t.accrued} decimals={Number(t.decimals)} symbol={t.symbol} /> : '—'} sub="Not yet due" />
-        <Stat label="Due" value={t ? <Money value={t.payable} decimals={Number(t.decimals)} symbol={t.symbol} /> : '—'} sub="Waiting for company revenue" />
+        <Stat label="Due" value={t ? <Money value={t.payable} decimals={Number(t.decimals)} symbol={t.symbol} /> : '—'} sub="Waiting to be paid" />
         <Stat label="Credited" value={t ? <Money value={t.settled} decimals={Number(t.decimals)} symbol={t.symbol} /> : '—'} sub="Added to your available balance" />
+        <Stat label="Paid offline" value={t ? <Money value={t.paid_offline} decimals={Number(t.decimals)} symbol={t.symbol} /> : '—'} sub="Paid to you by the team, outside the platform" />
       </div>
 
       {overview.map((o) =>
@@ -130,10 +136,12 @@ export default async function ReturnsPage() {
                 <Td className="text-fg-muted">{s.accrual_start_date ? `from ${s.accrual_start_date}${s.accrual_end_date ? ` to ${s.accrual_end_date} (excl.)` : ''}` : '—'}</Td>
                 <Td>
                   <Badge tone={st.tone} title={s.error ?? undefined}>{st.label}</Badge>
+                  {s.funding === 'offline' ? <span className="ml-1"><Badge tone="neutral" title="Principal handed to the team offline; returned offline by the team">Offline</Badge></span> : null}
                 </Td>
                 <Td>
                   {s.status === 'pending' ? <ActionButton url={`/api/returns/${s.id}`} body={{ action: 'cancel' }} confirmText="Cancel this subscription request?">Cancel</ActionButton> : null}
-                  {s.status === 'active' ? (
+                  {s.status === 'active' && s.funding === 'offline' ? <span className="text-xs text-fg-muted">The team returns this principal</span> : null}
+                  {s.status === 'active' && s.funding === 'platform' ? (
                     s.unlocked ? (
                       <ActionButton url={`/api/returns/${s.id}`} body={{ action: 'redeem' }} confirmText="Request your principal back? Accrual stops today and the principal returns to your available balance.">
                         Return principal
@@ -150,7 +158,7 @@ export default async function ReturnsPage() {
       </Card>
 
       <Card className="mt-6">
-        <CardHeader title="Daily accruals" subtitle="Each line is one UTC day: principal × daily rate, rounded down. Credited means added to your available balance; it reaches your wallet only when you withdraw." />
+        <CardHeader title="Daily accruals" subtitle="Each line is one UTC day: principal × daily rate, rounded down. Credited means added to your available balance (it reaches your wallet when you withdraw); paid offline means the team paid you outside the platform." />
         <Table head={['Day', 'Principal', 'Rate', 'Return', 'Due on', 'Status', 'Credited']} empty={mine.accruals.length ? null : <EmptyState title="No accruals yet">The first day accrues the day after your subscription opens.</EmptyState>}>
           {mine.accruals.map((a) => (
             <tr key={a.id}>
@@ -159,7 +167,9 @@ export default async function ReturnsPage() {
               <Td>{ppmToPercent(a.daily_rate_ppm)}%</Td>
               <Td><Money value={a.amount_base} decimals={Number(a.decimals)} symbol={a.symbol} maxFraction={6} /></Td>
               <Td className="text-fg-muted">{a.payable_on}</Td>
-              <Td><Badge tone={ACCRUAL_STATUS[a.status].tone}>{ACCRUAL_STATUS[a.status].label}</Badge></Td>
+              <Td>
+                {a.paid_offline ? <Badge tone="success">Paid offline by the team</Badge> : <Badge tone={ACCRUAL_STATUS[a.status].tone}>{ACCRUAL_STATUS[a.status].label}</Badge>}
+              </Td>
               <Td className="text-fg-muted">{a.settled_at ? dateTime(a.settled_at) : '—'}</Td>
             </tr>
           ))}

@@ -47,7 +47,7 @@ export default async function AdminOverviewPage() {
         <PageHeader
           title="Operations overview"
           description="Ledger-derived platform position, live queues and emergency controls. Amounts in tUSDT, 2 dp."
-          actions={can(staff.roles, 'jobs.trigger') ? <ActionButton url="/api/admin/jobs" body={{ job: 'reconciliation' }}>Run reconciliation</ActionButton> : undefined}
+          actions={can(staff.roles, 'jobs.trigger') ? <><ActionButton url="/api/admin/jobs" body={{ job: 'sync' }} variant="primary">Sync &amp; process now</ActionButton><ActionButton url="/api/admin/jobs" body={{ job: 'reconciliation' }}>Run reconciliation</ActionButton></> : undefined}
         />
       </Reveal>
 

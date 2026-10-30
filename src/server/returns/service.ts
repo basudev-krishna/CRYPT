@@ -33,7 +33,6 @@ import {
   effectiveEndDate,
   minPrincipalForNonZero,
   payableOn,
-  principalUnlocked,
   runwayDays,
   termEndDate,
   utcDate,
@@ -55,6 +54,8 @@ const requireNote = (note: string) => {
   if (note.trim().length < MIN_NOTE) throw new ReturnsError(`A note of at least ${MIN_NOTE} characters is required`, 'note_required');
 };
 
+export type Funding = 'platform' | 'offline';
+
 export interface PlanRow {
   id: string;
   name: string;
@@ -65,6 +66,7 @@ export interface PlanRow {
   payable_after_days: number;
   principal_lock_days: number;
   terms_reference: string;
+  auto_enroll: boolean;
   status: 'draft' | 'active' | 'closed';
   created_by: string;
   created_at: Date;
@@ -74,7 +76,7 @@ export interface PlanRow {
 }
 
 const PLAN_COLS = `id, name, token_id, daily_rate_ppm, min_principal_base::text, term_days, payable_after_days, principal_lock_days,
-                   terms_reference, status, created_by, created_at, activated_by, activated_at, closed_at`;
+                   terms_reference, auto_enroll, status, created_by, created_at, activated_by, activated_at, closed_at`;
 
 // -----------------------------------------------------------------------------
 // Plans (staff)
@@ -91,6 +93,7 @@ export async function createPlan(
     payableAfterDays: number;
     principalLockDays: number;
     termsReference: string;
+    autoEnroll?: boolean;
     staffUserId: string;
     actor: Actor;
   },
@@ -103,9 +106,9 @@ export async function createPlan(
   if (args.termsReference.trim().length < 5) throw new ReturnsError('Reference the approved written terms (document id or link)', 'terms_required');
   const row = await one<{ id: string }>(
     db,
-    `insert into public.return_plans (name, token_id, daily_rate_ppm, min_principal_base, term_days, payable_after_days, principal_lock_days, terms_reference, created_by)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`,
-    [args.name.trim(), token.id, args.dailyRatePpm, min.toString(), args.termDays, args.payableAfterDays, args.principalLockDays, args.termsReference.trim(), args.staffUserId],
+    `insert into public.return_plans (name, token_id, daily_rate_ppm, min_principal_base, term_days, payable_after_days, principal_lock_days, terms_reference, auto_enroll, created_by)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning id`,
+    [args.name.trim(), token.id, args.dailyRatePpm, min.toString(), args.termDays, args.payableAfterDays, args.principalLockDays, args.termsReference.trim(), args.autoEnroll ?? false, args.staffUserId],
   );
   await recordAudit(db, args.actor, 'returns.plan_created', { type: 'return_plan', id: row.id }, {
     dailyRatePpm: args.dailyRatePpm,
@@ -114,6 +117,7 @@ export async function createPlan(
     payableAfterDays: args.payableAfterDays,
     principalLockDays: args.principalLockDays,
     termsReference: args.termsReference.trim(),
+    autoEnroll: args.autoEnroll ?? false,
   });
   return row;
 }
@@ -129,6 +133,10 @@ export async function activatePlan(db: Db, args: { planId: string; note: string;
   if (p.status !== 'draft') throw new ReturnsError(`This plan is already ${p.status}`, 'invalid_state');
   const self = p.created_by === args.staffUserId;
   if (self && !(await isSoleAdmin(db, args.staffUserId))) throw new ReturnsError('A different administrator must activate a plan you created', 'four_eyes_required');
+  if (p.auto_enroll) {
+    const other = await maybeOne<{ id: string }>(db, "select id from public.return_plans where token_id = $1 and auto_enroll and status = 'active' and id <> $2", [p.token_id, p.id]);
+    if (other) throw new ReturnsError('Another automatic plan is already active for this token; close it first', 'auto_plan_exists');
+  }
   await db.query("update public.return_plans set status = 'active', activated_by = $2, activated_at = now(), activation_note = $3 where id = $1", [p.id, args.staffUserId, args.note.trim()]);
   const details = { dailyRatePpm: p.daily_rate_ppm, termsReference: p.terms_reference, note: args.note.trim(), selfActivated: self };
   await recordAudit(db, args.actor, 'returns.plan_activated', { type: 'return_plan', id: p.id }, details);
@@ -203,27 +211,42 @@ export async function cancelSubscription(db: Db, args: { userId: string; subscri
 }
 
 /** The member asks for their principal back once the plan's lock has passed. Accrual stops that day. */
-export async function requestRedemption(db: Db, args: { userId: string; subscriptionId: string; actor: Actor; now?: Date }): Promise<void> {
-  const s = await maybeOne<{ status: string; activated_at: Date | null; principal_lock_days: number }>(
+export async function requestRedemption(db: Db, args: { userId: string; subscriptionId: string; actor: Actor }): Promise<void> {
+  // The database clock decides the lock, exactly as the table guard does (no app/DB clock skew).
+  const s = await maybeOne<{ status: string; activated_at: Date | null; unlocked: boolean; funding: Funding }>(
     db,
-    `select s.status, s.activated_at, p.principal_lock_days from public.plan_subscriptions s join public.return_plans p on p.id = s.plan_id
+    `select s.status, s.activated_at, s.funding, coalesce(s.activated_at + make_interval(days => p.principal_lock_days) <= now(), false) as unlocked
+       from public.plan_subscriptions s join public.return_plans p on p.id = s.plan_id
       where s.id = $1 and s.user_id = $2 for update of s`,
     [args.subscriptionId, args.userId],
   );
   if (!s) throw new ReturnsError('Subscription not found', 'not_found');
+  if (s.funding === 'offline') throw new ReturnsError('This principal was handed to the team offline; the team returns it', 'returned_offline');
   if (s.status !== 'active' || !s.activated_at) throw new ReturnsError('Only an active subscription can be redeemed', 'invalid_state');
-  if (!principalUnlocked(new Date(s.activated_at), s.principal_lock_days, args.now ?? new Date())) throw new ReturnsError('Your principal is still within the lock period', 'principal_locked');
+  if (!s.unlocked) throw new ReturnsError('Your principal is still within the lock period', 'principal_locked');
   await db.query("update public.plan_subscriptions set status = 'redeem_requested', redeem_requested_at = now() where id = $1", [args.subscriptionId]);
   await recordAudit(db, args.actor, 'returns.redemption_requested', { type: 'plan_subscription', id: args.subscriptionId });
 }
 
 export type StepOutcome = 'posted' | 'failed' | 'deferred' | 'unchanged';
 
+/**
+ * The first day a subscription earns. Normally the day after it opens. An
+ * automatic enrolment earns from the day after the money was received, but
+ * never before the plan was activated (no promise for days before the plan).
+ */
+function firstAccrualDay(openedAt: Date, receivedAt: Date | null, plan: PlanRow): string {
+  if (!receivedAt) return accrualStartDate(openedAt);
+  const afterReceipt = accrualStartDate(new Date(receivedAt));
+  const planStart = plan.activated_at ? utcDate(new Date(plan.activated_at)) : afterReceipt;
+  return afterReceipt > planStart ? afterReceipt : planStart;
+}
+
 /** Worker: move the principal from available cash into the plan, under the balance lock. */
 export async function openSubscription(db: Db, subscriptionId: string, actor: Actor): Promise<StepOutcome> {
-  const s = await maybeOne<{ id: string; user_id: string; plan_id: string; token_id: number; principal_base: string; status: string }>(
+  const s = await maybeOne<{ id: string; user_id: string; plan_id: string; token_id: number; principal_base: string; status: string; funding: Funding; principal_received_at: Date | null }>(
     db,
-    'select id, user_id, plan_id, token_id, principal_base::text, status from public.plan_subscriptions where id = $1 for update',
+    'select id, user_id, plan_id, token_id, principal_base::text, status, funding, principal_received_at from public.plan_subscriptions where id = $1 for update',
     [subscriptionId],
   );
   if (!s || s.status !== 'pending') return 'unchanged';
@@ -235,6 +258,19 @@ export async function openSubscription(db: Db, subscriptionId: string, actor: Ac
   };
   if (plan.status !== 'active') return fail('the plan closed before the subscription was opened');
   if ((await getAccountStatus(db, s.user_id)) !== 'active') return fail('the account is not active');
+
+  if (s.funding === 'offline') {
+    // Principal was handed over offline: nothing moves on the ledger, accrual starts the same way.
+    const at = await one<{ now: Date }>(db, 'select now()');
+    const start = firstAccrualDay(new Date(at.now), s.principal_received_at, plan);
+    await db.query(
+      "update public.plan_subscriptions set status = 'active', activated_at = $2, accrual_start_date = $3, accrual_end_date = $4, error = null where id = $1",
+      [s.id, at.now, start, termEndDate(start, plan.term_days)],
+    );
+    await notify(db, { userId: s.user_id, kind: 'plan_subscription_opened', payload: { subscriptionId: s.id, principalBase: s.principal_base, offline: true }, dedupeKey: `plan_subscription:${s.id}:open` });
+    await recordAudit(db, actor, 'returns.subscription_opened', { type: 'plan_subscription', id: s.id }, { offline: true, accrualStartDate: start });
+    return 'posted';
+  }
 
   const tokenId = Number(s.token_id);
   const amount = parseBase(s.principal_base);
@@ -253,7 +289,7 @@ export async function openSubscription(db: Db, subscriptionId: string, actor: Ac
     metadata: { planId: plan.id, dailyRatePpm: plan.daily_rate_ppm },
   });
   const activated = await one<{ activated_at: Date }>(db, 'select now() as activated_at');
-  const start = accrualStartDate(new Date(activated.activated_at));
+  const start = firstAccrualDay(new Date(activated.activated_at), s.principal_received_at, plan);
   await db.query(
     "update public.plan_subscriptions set status = 'active', activated_at = $2, open_entry_id = $3, accrual_start_date = $4, accrual_end_date = $5, error = null where id = $1",
     [s.id, activated.activated_at, entryId, start, termEndDate(start, plan.term_days)],
@@ -274,9 +310,10 @@ export async function redeemSubscription(db: Db, subscriptionId: string, actor: 
     accrual_start_date: string;
     accrual_end_date: string | null;
     redeem_requested_at: Date;
+    funding: Funding;
   }>(
     db,
-    `select id, user_id, token_id, principal_base::text, status, to_char(accrual_start_date, 'YYYY-MM-DD') as accrual_start_date,
+    `select id, user_id, token_id, principal_base::text, status, funding, to_char(accrual_start_date, 'YYYY-MM-DD') as accrual_start_date,
             to_char(accrual_end_date, 'YYYY-MM-DD') as accrual_end_date, redeem_requested_at
        from public.plan_subscriptions where id = $1 for update`,
     [subscriptionId],
@@ -284,6 +321,16 @@ export async function redeemSubscription(db: Db, subscriptionId: string, actor: 
   if (!s || s.status !== 'redeem_requested') return 'unchanged';
   const tokenId = Number(s.token_id);
   const amount = parseBase(s.principal_base);
+  // Redeemed before the first accrued day: an empty window [start, start).
+  const requestedEnd = effectiveEndDate(s.accrual_end_date, new Date(s.redeem_requested_at))!;
+  const end = requestedEnd < s.accrual_start_date ? s.accrual_start_date : requestedEnd;
+  if (s.funding === 'offline') {
+    // The team returns offline principal offline; the record only closes the subscription.
+    await db.query("update public.plan_subscriptions set status = 'redeemed', redeemed_at = now(), accrual_end_date = $2 where id = $1", [s.id, end]);
+    await notify(db, { userId: s.user_id, kind: 'plan_principal_returned', payload: { subscriptionId: s.id, principalBase: s.principal_base, offline: true }, dedupeKey: `plan_subscription:${s.id}:redeem` });
+    await recordAudit(db, actor, 'returns.principal_returned', { type: 'plan_subscription', id: s.id }, { offline: true });
+    return 'posted';
+  }
   const entryId = await postEntry(db, {
     idempotencyKey: `plan_subscription:${s.id}:redeem`,
     eventType: 'plan_principal_returned',
@@ -293,9 +340,6 @@ export async function redeemSubscription(db: Db, subscriptionId: string, actor: 
     postedBy: postedBy(actor),
     lines: transfer(await ensureAccount(db, 'plan_principal', tokenId, { userId: s.user_id }), await ensureAccount(db, 'user_cash', tokenId, { userId: s.user_id }), amount),
   });
-  // Redeemed before the first accrued day: an empty window [start, start).
-  const requestedEnd = effectiveEndDate(s.accrual_end_date, new Date(s.redeem_requested_at))!;
-  const end = requestedEnd < s.accrual_start_date ? s.accrual_start_date : requestedEnd;
   await db.query("update public.plan_subscriptions set status = 'redeemed', redeemed_at = now(), redeem_entry_id = $2, accrual_end_date = $3 where id = $1", [s.id, entryId, end]);
   await notify(db, { userId: s.user_id, kind: 'plan_principal_returned', payload: { subscriptionId: s.id, principalBase: s.principal_base }, dedupeKey: `plan_subscription:${s.id}:redeem` });
   await recordAudit(db, actor, 'returns.principal_returned', { type: 'plan_subscription', id: s.id }, { entryId });
@@ -451,7 +495,9 @@ export async function settlePayables(db: Db, tokenId: number, actor: Actor, now:
   const payable = await many<{ id: string; user_id: string; amount_base: string; accrual_date: string; account_status: string | null }>(
     db,
     `select a.id, a.user_id, a.amount_base::text, to_char(a.accrual_date, 'YYYY-MM-DD') as accrual_date, p.account_status
-       from public.return_accruals a left join public.user_profiles p on p.user_id = a.user_id
+       from public.return_accruals a
+       join public.plan_subscriptions s on s.id = a.subscription_id and s.funding = 'platform'
+       left join public.user_profiles p on p.user_id = a.user_id
       where a.status = 'payable' and a.token_id = $1 order by a.payable_on, a.accrual_date, a.id limit $2 for update of a`,
     [tokenId, limit],
   );
@@ -512,7 +558,7 @@ export async function listPendingSubscriptionIds(db: Db, status: 'pending' | 're
 }
 
 export async function listReturnTokenIds(db: Db): Promise<number[]> {
-  return (await many<{ token_id: number }>(db, "select distinct token_id from public.return_accruals where status = 'payable'")).map((r) => Number(r.token_id));
+  return (await many<{ token_id: number }>(db, "select distinct a.token_id from public.return_accruals a join public.plan_subscriptions s on s.id = a.subscription_id where a.status = 'payable' and s.funding = 'platform'")).map((r) => Number(r.token_id));
 }
 
 // -----------------------------------------------------------------------------
@@ -524,6 +570,7 @@ export interface ReturnsTokenOverview {
   symbol: string;
   decimals: number;
   principal: bigint;
+  offlinePrincipal: bigint;
   accrued: bigint;
   payable: bigint;
   reserve: bigint;
@@ -553,6 +600,7 @@ export async function returnsOverview(db: Db): Promise<ReturnsTokenOverview[]> {
     settled_to_date: string;
     revenue_to_date: string;
     run_rate: string;
+    offline_principal: string;
   }>(
     db,
     `with t as (
@@ -576,7 +624,9 @@ export async function returnsOverview(db: Db): Promise<ReturnsTokenOverview[]> {
                        where al.kind = 'business_revenue' and al.status = 'posted' and d.token_id = t.token_id), 0)::text as revenue_to_date,
             coalesce((select sum(div(s.principal_base * p.daily_rate_ppm, 1000000)) from public.plan_subscriptions s join public.return_plans p on p.id = s.plan_id
                        where s.token_id = t.token_id and s.status = 'active'
-                         and (s.accrual_end_date is null or s.accrual_end_date > (now() at time zone 'utc')::date)), 0)::text as run_rate
+                         and (s.accrual_end_date is null or s.accrual_end_date > (now() at time zone 'utc')::date)), 0)::text as run_rate,
+            coalesce((select sum(s.principal_base) from public.plan_subscriptions s
+                       where s.token_id = t.token_id and s.funding = 'offline' and s.status in ('active', 'redeem_requested')), 0)::text as offline_principal
        from t join public.supported_tokens tok on tok.id = t.token_id
       order by t.token_id`,
   );
@@ -591,6 +641,7 @@ export async function returnsOverview(db: Db): Promise<ReturnsTokenOverview[]> {
       symbol: r.symbol,
       decimals: Number(r.decimals),
       principal: parseBase(r.principal),
+      offlinePrincipal: parseBase(r.offline_principal),
       accrued,
       payable,
       reserve,
@@ -648,10 +699,11 @@ export async function adminSubscriptions(db: Db) {
     activated_at: Date | null;
     accrued_total: string;
     settled_total: string;
+    funding: Funding;
     error: string | null;
   }>(
     db,
-    `select s.id, s.user_id, u.email, u.member_code, p.name as plan_name, s.principal_base::text, t.symbol, t.decimals, s.status, s.activated_at, s.error,
+    `select s.id, s.user_id, u.email, u.member_code, p.name as plan_name, s.principal_base::text, t.symbol, t.decimals, s.status, s.activated_at, s.error, s.funding,
             coalesce((select sum(a.amount_base) from public.return_accruals a where a.subscription_id = s.id), 0)::text as accrued_total,
             coalesce((select sum(a.amount_base) from public.return_accruals a where a.subscription_id = s.id and a.status = 'settled'), 0)::text as settled_total
        from public.plan_subscriptions s
@@ -680,13 +732,14 @@ export async function memberReturns(db: Db, userId: string) {
       principal_lock_days: number;
       unlock_at: Date | null;
       unlocked: boolean;
+      funding: Funding;
       error: string | null;
     }>(
       db,
       `select s.id, p.name as plan_name, p.daily_rate_ppm, s.principal_base::text, t.symbol, t.decimals, s.status, s.requested_at, s.activated_at,
               to_char(s.accrual_start_date, 'YYYY-MM-DD') as accrual_start_date, to_char(s.accrual_end_date, 'YYYY-MM-DD') as accrual_end_date,
               p.principal_lock_days, s.activated_at + make_interval(days => p.principal_lock_days) as unlock_at,
-              coalesce(s.activated_at + make_interval(days => p.principal_lock_days) <= now(), false) as unlocked, s.error
+              coalesce(s.activated_at + make_interval(days => p.principal_lock_days) <= now(), false) as unlocked, s.funding, s.error
          from public.plan_subscriptions s join public.return_plans p on p.id = s.plan_id join public.supported_tokens t on t.id = s.token_id
         where s.user_id = $1 order by s.requested_at desc`,
       [userId],
@@ -700,26 +753,32 @@ export async function memberReturns(db: Db, userId: string) {
       payable_on: string;
       status: 'accrued' | 'payable' | 'settled';
       settled_at: Date | null;
+      paid_offline: boolean;
       symbol: string;
       decimals: number;
     }>(
       db,
-      `select a.id, to_char(a.accrual_date, 'YYYY-MM-DD') as accrual_date, a.principal_base::text, a.daily_rate_ppm, a.amount_base::text,
+      `select a.id, (a.offline_payment_id is not null) as paid_offline, to_char(a.accrual_date, 'YYYY-MM-DD') as accrual_date, a.principal_base::text, a.daily_rate_ppm, a.amount_base::text,
               to_char(a.payable_on, 'YYYY-MM-DD') as payable_on, a.status, a.settled_at, t.symbol, t.decimals
          from public.return_accruals a join public.supported_tokens t on t.id = a.token_id
         where a.user_id = $1 order by a.accrual_date desc, a.id desc limit 120`,
       [userId],
     ),
-    many<{ token_id: number; symbol: string; decimals: number; principal: string; accrued: string; payable: string; settled: string; daily: string }>(
+    many<{ token_id: number; symbol: string; decimals: number; principal: string; offline_principal: string; accrued: string; payable: string; settled: string; paid_offline: string; daily: string }>(
       db,
       `select t.id as token_id, t.symbol, t.decimals,
               coalesce((select sum(b.balance) from public.ledger_accounts a join public.account_balances b on b.account_id = a.id
                          where a.user_id = $1 and a.token_id = t.id and a.purpose = 'plan_principal'), 0)::text as principal,
+              coalesce((select sum(s.principal_base) from public.plan_subscriptions s
+                         where s.user_id = $1 and s.token_id = t.id and s.funding = 'offline' and s.status in ('active', 'redeem_requested')), 0)::text as offline_principal,
               coalesce((select sum(b.balance) from public.ledger_accounts a join public.account_balances b on b.account_id = a.id
                          where a.user_id = $1 and a.token_id = t.id and a.purpose = 'return_accrued'), 0)::text as accrued,
               coalesce((select sum(b.balance) from public.ledger_accounts a join public.account_balances b on b.account_id = a.id
                          where a.user_id = $1 and a.token_id = t.id and a.purpose = 'return_payable'), 0)::text as payable,
-              coalesce((select sum(r.amount_base) from public.return_accruals r where r.user_id = $1 and r.token_id = t.id and r.status = 'settled'), 0)::text as settled,
+              coalesce((select sum(r.amount_base) from public.return_accruals r
+                         where r.user_id = $1 and r.token_id = t.id and r.status = 'settled' and r.offline_payment_id is null), 0)::text as settled,
+              coalesce((select sum(r.amount_base) from public.return_accruals r
+                         where r.user_id = $1 and r.token_id = t.id and r.offline_payment_id is not null), 0)::text as paid_offline,
               coalesce((select sum(div(s.principal_base * p.daily_rate_ppm, 1000000)) from public.plan_subscriptions s join public.return_plans p on p.id = s.plan_id
                          where s.user_id = $1 and s.token_id = t.id and s.status = 'active'
                            and (s.accrual_end_date is null or s.accrual_end_date > (now() at time zone 'utc')::date)), 0)::text as daily

@@ -52,6 +52,11 @@ export function utcDate(at: Date): string {
   return at.toISOString().slice(0, 10);
 }
 
+/** Today's UTC date. */
+export function todayUtc(): string {
+  return utcDate(new Date());
+}
+
 export function addDays(date: string, days: number): string {
   return new Date(toMs(date) + days * DAY_MS).toISOString().slice(0, 10);
 }

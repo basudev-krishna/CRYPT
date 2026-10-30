@@ -17,6 +17,13 @@ const schema = z.object({
   /** Private-group operation: no investment pool; hides portfolio and trading pages. */
   GROUP_MODE: bool,
   REAL_FUNDS_ENABLED: bool,
+  /**
+   * 'queue' (default): background jobs go to the worker process via pg-boss.
+   * 'inline': there is no worker; each job runs immediately inside the admin's
+   * request with the worker's database role (DATABASE_URL_WORKER), and the
+   * admin's "Sync & process now" runs what the worker's schedule would.
+   */
+  JOBS_MODE: z.enum(['queue', 'inline']).default('queue'),
 });
 
 export type ServerEnv = z.infer<typeof schema>;

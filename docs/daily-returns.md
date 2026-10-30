@@ -84,6 +84,62 @@ What each figure means, and what it never means:
 - **Principal** stays in the group wallet and is a customer liability in the solvency check. Moving it
   out to deploy in the business is not supported yet (decision 1).
 
+## Automatic enrolment
+
+A plan created with **auto_enroll** (migration `20261030000500`, `src/server/returns/enroll.ts`)
+enrols every member deposit without the member subscribing. Existing deposits are enrolled on the
+first worker run after activation, and new ones as they are credited.
+
+- On-platform: each `user_cash` credit from `deposit_credit` or an assignment/distribution
+  (`deposit_allocated`), not reversed, becomes a subscription that moves that cash into
+  `plan_principal`. It is capped at the member's available cash less pending enrolments, so money
+  already withdrawn is not enrolled. Amounts below the plan minimum are left in available balance.
+- Offline: each off-platform contribution of a linked member, not reversed, becomes an offline
+  subscription.
+- Each source is enrolled once (unique `source_line_id` / `source_offchain_entry_id`).
+- Accrual starts the day after the money was received, **but never before the plan was activated**,
+  so no obligation is created for days before the plan existed.
+- Only one automatic plan per token may be active. The worker may insert only automatic
+  enrolments into an active automatic plan (database guard).
+- Consequence for members: enrolled deposits leave available balance and can be withdrawn only by
+  redeeming principal after the plan's lock. Choose the lock accordingly.
+- Not enrolled automatically: manual adjustments (admin credits from the operator float or reward
+  fund). These mix deposits with rewards, so record those deposits as offline principal instead.
+- Known edge: an offline contribution later moved on-platform keeps its offline plan (its
+  assignment is not enrolled a second time). Record the offline principal as returned if the member
+  should now hold it on the platform.
+
+## Offline principal and payments
+
+Most members hand their principal to the team offline and are paid offline (migration
+`20261030000400`, `src/server/returns/offline.ts`, permission `returns.offline`: admin, operations).
+
+- A team member records an **offline subscription** (member, plan, amount, reference to the offline
+  receipt). Its principal never enters the double-entry ledger, because no wallet money backs it: it
+  is never withdrawable here and never in custody solvency. Members can't redeem it on the platform;
+  the team records when it is returned offline (accrual stops that day).
+- Its returns **accrue on the ledger like any other**. They are what the company owes.
+- A team member records an **offline payment** of a member's due returns through a date:
+  D `return_payable` / C `return_cost` per accrual (key `return_accrual:<id>:offline`). Nothing is
+  credited to available balance, and it is labelled "Paid offline by the team", never as an on-chain
+  payment.
+- Offline plans are never paid from the on-chain reserve, so a return can't be paid twice.
+- The member's dashboard **Total account value** includes plan principal (on-platform and offline)
+  and returns owed (accrued + due), each as a labelled slice. Available balance is unchanged.
+- Every offline record needs a reference or note, is audited, and raises a high-severity alert
+  (kind suffixed `_self` when staff record it for themselves).
+
+## Running without a worker
+
+With `JOBS_MODE=inline` the deployment has no worker process. Every job an admin action would
+queue runs immediately in that request, using the worker's database role and handlers, so the same
+ledger rules apply. **Sync & process now** (admin overview and Daily returns) runs one pass of the
+worker's schedule: chain scan, deposit credits, pending allocations/adjustments/rewards,
+enrolment, accrual, maturity, settlement, offline payments, reconciliation and alerts. Accrual
+catches up every missed day, so a sync once a day (or whenever the admin opens the console) keeps
+members' balances current. Nothing accrues between syncs: a day becomes visible at the first sync
+after it ends.
+
 ## Calculation (reproducible)
 
 - Rate is stored as integer parts per million (`daily_rate_ppm`; 0.33% = 3300).
@@ -111,6 +167,16 @@ What each figure means, and what it never means:
 - Revenue: only through allocation kind `business_revenue`. It needs a business line, revenue
   period and evidence reference, and is refused when the sender is an active member wallet or has
   previously funded a member deposit. Always a high-severity alert.
+- Company funding wallets (migration `20261030000300`, `src/server/returns/funding.ts`): the team
+  sends USDT to the group wallet daily to fund returns. An administrator registers each sending
+  address once (always a high-severity alert). The worker then records every unattributed receipt
+  from an active funding wallet as `business_revenue` automatically: business line = wallet label,
+  evidence = transaction hash, `created_by` = the administrator who registered the wallet. The
+  database refuses a funding wallet that is, or has acted as, a member's wallet, refuses member
+  wallets that are funding wallets, and lets the worker create no other kind of allocation. With
+  `payable_after_days = 0`, each day's return is credited to available balance on the first worker
+  run after UTC midnight once the day's funding has arrived; if it hasn't, it is credited as soon as
+  it does.
 - Pauses (`system_controls`, shown on the console): `return_accruals_paused` delays accrual (days are
   caught up on resume), and `return_settlements_paused` holds all settlement. Resuming follows the
   existing four-eyes / sole-admin cooldown rule.

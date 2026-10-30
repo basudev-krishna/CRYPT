@@ -14,6 +14,7 @@ const schema = z.object({
   payableAfterDays: z.number().int().min(0).max(3650),
   principalLockDays: z.number().int().min(0).max(3650),
   termsReference: z.string().trim().min(5).max(500),
+  autoEnroll: z.boolean().default(false),
 });
 
 /** Draft a daily-return plan. Terms are immutable; it creates no obligation until another administrator activates it. */

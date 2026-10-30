@@ -27,6 +27,9 @@ import {
   redeemSubscription,
   settlePayables,
 } from '../src/server/returns/service';
+import { recordFundingReceipts } from '../src/server/returns/funding';
+import { enrollDeposits } from '../src/server/returns/enroll';
+import { listPendingOfflinePaymentIds, postOfflinePayment } from '../src/server/returns/offline';
 import { notify, raiseRiskEvent, serviceActor } from '../src/server/ops';
 import { dispatchRiskAlerts, getAlertSender } from '../src/server/alerts';
 import type { JobPayloads } from '../src/server/jobs/queues';
@@ -96,17 +99,21 @@ export function createHandlers(pool: pg.Pool, enqueue: Enqueue, env: NodeJS.Proc
 
     /**
      * Fixed daily returns: open requested subscriptions, return requested
-     * principal, accrue finished days, move due returns to payable, then pay
-     * them from the revenue reserve. One transaction per step and subject, so
+     * principal, accrue finished days, move due returns to payable, record
+     * receipts from company funding wallets, then pay due returns from the
+     * revenue reserve. One transaction per step and subject, so
      * a failure in one never blocks the others; every step is idempotent.
      */
     async returnsProcess() {
       const actor = serviceActor('daily-returns');
+      await withTransaction(pool, (db) => enrollDeposits(db, actor));
       for (const id of await listPendingSubscriptionIds(pool, 'pending')) await withTransaction(pool, (db) => openSubscription(db, id, actor));
       for (const id of await listAccruingSubscriptionIds(pool)) await withTransaction(pool, (db) => accrueSubscription(db, id, actor));
       for (const id of await listPendingSubscriptionIds(pool, 'redeem_requested')) await withTransaction(pool, (db) => redeemSubscription(db, id, actor));
       while ((await withTransaction(pool, (db) => matureAccruals(db, actor))) > 0);
+      await withTransaction(pool, (db) => recordFundingReceipts(db, actor));
       for (const tokenId of await listReturnTokenIds(pool)) await withTransaction(pool, (db) => settlePayables(db, tokenId, actor));
+      for (const id of await listPendingOfflinePaymentIds(pool)) await withTransaction(pool, (db) => postOfflinePayment(db, id, actor));
     },
 
     /** A reversal the ledger refuses (e.g. the member already spent the cash) is recorded as failed, not retried forever. */

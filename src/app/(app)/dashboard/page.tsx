@@ -15,6 +15,7 @@ import { serverEnv } from '@/server/env';
 import { realFundsActive } from '@/server/phase-guard';
 import { memberHolding, microToBase } from '@/server/offchain/holdings';
 import { heldLabel } from '@/components/ui/offchain';
+import { memberReturns } from '@/server/returns/service';
 
 export const metadata: Metadata = { title: 'Overview' };
 
@@ -33,17 +34,27 @@ function greeting(): string {
 export default async function DashboardPage() {
   const user = await pageUser();
   const db = webDb();
-  const [d, series, activity, offPlatform] = await Promise.all([
+  const [d, series, activity, offPlatform, returns] = await Promise.all([
     getDashboard(db, user.id),
     getUserSeries(db, user.id, 90),
     listActivity(db, user.id, 8),
     memberHolding(db, user.id),
+    // Until the daily-returns migrations are applied the tables don't exist; show the rest of the dashboard.
+    memberReturns(db, user.id).catch((err: { code?: string }) => {
+      if (err.code === '42P01' || err.code === '42703') return { subscriptions: [], accruals: [], totals: [] };
+      throw err;
+    }),
   ]);
   const dec = d.token?.decimals ?? 6;
   const sym = d.token?.symbol ?? 'USDT';
   // Money the administrator holds for them counts in their total, not in what they can withdraw.
   const held = offPlatform && offPlatform.balance > 0n ? microToBase(offPlatform.balance, dec) : 0n;
-  const total = d.totalAccountValue + held;
+  // Daily-return plans: principal (on the platform or handed over offline) and returns the company owes.
+  // Both count in the total; neither is withdrawable here until returns are credited to available.
+  const rt = returns.totals.find((t) => Number(t.token_id) === d.token?.id) ?? returns.totals[0];
+  const planPrincipal = rt ? BigInt(rt.principal) + BigInt(rt.offline_principal) : 0n;
+  const returnsOwed = rt ? BigInt(rt.accrued) + BigInt(rt.payable) : 0n;
+  const total = d.totalAccountValue + held + planPrincipal + returnsOwed;
   // Recent activity: ledger entries plus what the administrator recorded for them, newest first.
   const recent = [
     ...activity.map((a) => ({
@@ -80,6 +91,8 @@ export default async function DashboardPage() {
     { key: 'pending', label: 'Pending investment', amount: d.pendingSubscription },
     { key: 'reserved', label: 'Reserved for withdrawals', amount: d.reserved },
     { key: 'held', label: 'Recorded by the administrator', amount: held },
+    { key: 'principal', label: 'Plan principal', amount: planPrincipal },
+    { key: 'owed', label: 'Daily returns owed (not yet paid)', amount: returnsOwed },
   ].map((s) => ({ key: s.key, label: s.label, value: baseToChart(s.amount, dec), display: `${fmt(s.amount, dec)} ${sym}` }));
 
   return (
@@ -115,7 +128,7 @@ export default async function DashboardPage() {
 
       <Stagger className={`grid gap-4 sm:grid-cols-2 ${group ? '' : 'xl:grid-cols-4'}`}>
         <StaggerItem>
-          <Stat emphasis icon={Wallet} label="Total account value" value={<Money value={total} decimals={dec} symbol={sym} className="[&>span]:text-white/70" />} badge={d.isSimulated ? <SimulatedBadge /> : null} sub={`${group ? 'Available + reserved for withdrawals' : 'Available + reserved + pending + investments'}`} />
+          <Stat emphasis icon={Wallet} label="Total account value" value={<Money value={total} decimals={dec} symbol={sym} className="[&>span]:text-white/70" />} badge={d.isSimulated ? <SimulatedBadge /> : null} sub={`${group ? 'Available + reserved for withdrawals' : 'Available + reserved + pending + investments'}${planPrincipal + returnsOwed > 0n ? ' + plan principal + returns owed' : ''}`} />
         </StaggerItem>
         <StaggerItem>
           <Stat icon={PiggyBank} label="Available to withdraw" value={<Money value={d.available} decimals={dec} symbol={sym} />} sub={<>Reserved: <Money value={d.reserved} decimals={dec} /></>} />

@@ -25,6 +25,7 @@ export const PERMISSIONS = {
   'balance.adjust': ['admin'], // credit/debit a member against the operator float (always alerted)
   'offchain.record': ['admin'], // off-platform holdings: money members handed the admin personally
   'returns.configure': ['admin'], // create, activate (four-eyes) and close fixed daily-return plans
+  'returns.offline': ['admin', 'operations'], // record offline principal, offline principal return and offline payment of returns (always alerted)
   'risk.resolve': ['admin', 'compliance'],
   'control.pause': ['admin', 'operations', 'compliance'], // anyone on duty can stop payouts
   'control.resume': ['admin'], // resuming is exceptional; see canResume()
