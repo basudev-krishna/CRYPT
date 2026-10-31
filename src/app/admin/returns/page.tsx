@@ -58,6 +58,13 @@ export default async function AdminReturnsPage() {
       <Notice tone="warn" title="Not approved for live use">
         Legal form, shortfall terms, capital deployment and revenue review are open decisions. See <Mono>docs/daily-returns.md</Mono> before activating a plan.
       </Notice>
+      {!plans.some((p) => p.status === 'active' && p.auto_enroll) ? (
+        <div className="mt-4">
+          <Notice tone="danger" title="Deposits are not earning daily returns">
+            No active plan has automatic enrolment, so members&apos; deposits are not enrolled and members are asked to subscribe by hand. Create a plan below with automatic enrolment ticked and activate it; the next sync enrols every existing and new deposit.
+          </Notice>
+        </div>
+      ) : null}
       {paused.length ? (
         <div className="mt-4">
           <Notice tone="danger" title="Paused">

@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import { pageUser } from '@/server/http/auth';
 import { webDb } from '@/server/db';
-import { userBalances } from '@/server/ledger/ledger';
 import { listPlans, memberReturns, returnsOverview } from '@/server/returns/service';
 import { ppmToPercent } from '@/server/returns/math';
 import { isControlEnabled } from '@/server/ops';
@@ -9,7 +8,6 @@ import { Badge, Card, CardHeader, EmptyState, Notice, PageHeader, Table, Td } fr
 import { Money, fmt } from '@/components/ui/money';
 import { Stat } from '@/components/app/stat';
 import { ActionButton } from '@/components/app/actions';
-import { SubscribePlanForm } from '@/components/app/returns-forms';
 import { dateTime } from '@/lib/format';
 
 export const metadata: Metadata = { title: 'Daily returns' };
@@ -36,15 +34,13 @@ const pct = (bps: bigint) => `${bps / 100n}.${String(bps % 100n).padStart(2, '0'
 export default async function ReturnsPage() {
   const user = await pageUser();
   const db = webDb();
-  const [mine, plans, balances, overview, settlementsPaused] = await Promise.all([
+  const [mine, plans, overview, settlementsPaused] = await Promise.all([
     memberReturns(db, user.id),
     listPlans(db, { offeredOnly: true }),
-    userBalances(db, user.id),
     returnsOverview(db),
     isControlEnabled(db, 'return_settlements_paused'),
   ]);
   const t = mine.totals[0];
-  const cash = (tokenId: number) => balances.find((b) => b.tokenId === tokenId)?.cash ?? 0n;
 
   return (
     <>
@@ -108,14 +104,11 @@ export default async function ReturnsPage() {
                     </div>
                   ))}
                 </dl>
-                <div className="mt-4">
-                  <SubscribePlanForm
-                    planId={p.id}
-                    symbol={p.symbol}
-                    minDisplay={fmt(p.min_principal_base, Number(p.decimals))}
-                    availableDisplay={fmt(cash(Number(p.token_id)), Number(p.decimals))}
-                  />
-                </div>
+                <p className="mt-4 text-sm text-fg-muted">
+                  {p.auto_enroll
+                    ? `Nothing to do: every deposit of ${fmt(p.min_principal_base, Number(p.decimals))} ${p.symbol} or more is enrolled automatically and earns daily.`
+                    : 'Deposits are enrolled by the team; there is nothing to do here.'}
+                </p>
               </div>
             ))}
           </div>
