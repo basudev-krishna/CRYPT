@@ -24,6 +24,12 @@ const schema = z.object({
    * admin's "Sync & process now" runs what the worker's schedule would.
    */
   JOBS_MODE: z.enum(['queue', 'inline']).default('queue'),
+  /**
+   * Bearer token for /internal/cron/sync, the scheduled sync pass that replaces
+   * the worker's schedule under JOBS_MODE=inline (Vercel Cron sends it itself).
+   * Unset: the endpoint refuses every call.
+   */
+  CRON_SECRET: z.string().min(32, 'CRON_SECRET must be at least 32 characters').optional(),
 });
 
 export type ServerEnv = z.infer<typeof schema>;

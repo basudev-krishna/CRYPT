@@ -70,21 +70,24 @@ describe('UTC day windows', () => {
     expect(daysBetween('2026-11-02', '2027-11-02')).toBe(365);
   });
 
-  it('ends at the term or the redemption day, whichever is first', () => {
+  it('ends at the term or after the redemption day, whichever is first', () => {
     expect(termEndDate('2026-11-02', 30)).toBe('2026-12-02');
     expect(termEndDate('2026-11-02', null)).toBeNull();
     expect(effectiveEndDate('2026-12-02', null)).toBe('2026-12-02');
-    expect(effectiveEndDate(null, new Date('2026-11-10T08:00:00Z'))).toBe('2026-11-10');
-    expect(effectiveEndDate('2026-12-02', new Date('2026-11-10T08:00:00Z'))).toBe('2026-11-10');
+    expect(effectiveEndDate(null, new Date('2026-11-10T08:00:00Z'))).toBe('2026-11-11');
+    expect(effectiveEndDate('2026-12-02', new Date('2026-11-10T08:00:00Z'))).toBe('2026-11-11');
     expect(effectiveEndDate('2026-11-05', new Date('2026-11-10T08:00:00Z'))).toBe('2026-11-05');
+    expect(effectiveEndDate('2026-11-11', new Date('2026-11-10T23:59:59Z'))).toBe('2026-11-11');
     expect(effectiveEndDate(null, null)).toBeNull();
   });
 
-  it('lists only finished, unaccrued days and catches up missed ones', () => {
-    expect(dueAccrualDates({ start: '2026-11-02', end: null, lastAccrued: null, today: '2026-11-02' })).toEqual([]);
-    expect(dueAccrualDates({ start: '2026-11-02', end: null, lastAccrued: null, today: '2026-11-05' })).toEqual(['2026-11-02', '2026-11-03', '2026-11-04']);
-    expect(dueAccrualDates({ start: '2026-11-02', end: null, lastAccrued: '2026-11-03', today: '2026-11-05' })).toEqual(['2026-11-04']);
-    expect(dueAccrualDates({ start: '2026-11-02', end: null, lastAccrued: '2026-11-04', today: '2026-11-05' })).toEqual([]);
+  it('lists started, unaccrued days (today included) and catches up missed ones', () => {
+    expect(dueAccrualDates({ start: '2026-11-02', end: null, lastAccrued: null, today: '2026-11-01' })).toEqual([]);
+    expect(dueAccrualDates({ start: '2026-11-02', end: null, lastAccrued: null, today: '2026-11-02' })).toEqual(['2026-11-02']);
+    expect(dueAccrualDates({ start: '2026-11-02', end: null, lastAccrued: '2026-11-02', today: '2026-11-02' })).toEqual([]);
+    expect(dueAccrualDates({ start: '2026-11-02', end: null, lastAccrued: null, today: '2026-11-05' })).toEqual(['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05']);
+    expect(dueAccrualDates({ start: '2026-11-02', end: null, lastAccrued: '2026-11-03', today: '2026-11-05' })).toEqual(['2026-11-04', '2026-11-05']);
+    expect(dueAccrualDates({ start: '2026-11-02', end: null, lastAccrued: '2026-11-05', today: '2026-11-05' })).toEqual([]);
     expect(dueAccrualDates({ start: '2026-11-02', end: '2026-11-04', lastAccrued: null, today: '2026-11-30' })).toEqual(['2026-11-02', '2026-11-03']);
     expect(dueAccrualDates({ start: '2026-11-02', end: '2026-11-02', lastAccrued: null, today: '2026-11-30' })).toEqual([]);
     expect(dueAccrualDates({ start: '2026-11-02', end: null, lastAccrued: null, today: '2027-11-02', limit: 10 })).toHaveLength(10);

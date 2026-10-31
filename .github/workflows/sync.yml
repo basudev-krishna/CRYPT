@@ -1,0 +1,32 @@
+# Runs the platform's sync pass on a schedule (JOBS_MODE=inline, no worker):
+# credits deposits, enrols and accrues daily returns, settles what is due.
+# Vercel Cron (vercel.json) runs it once a day as a backstop; this runs it
+# every 30 minutes. Needs repository secrets SYNC_URL
+# (https://<site>/internal/cron/sync) and CRON_SECRET (same value as on Vercel).
+name: Scheduled sync
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: scheduled-sync
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Run one sync pass
+        env:
+          SYNC_URL: ${{ secrets.SYNC_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$SYNC_URL" ] || [ -z "$CRON_SECRET" ]; then echo "SYNC_URL / CRON_SECRET secrets are not set"; exit 1; fi
+          code=$(curl -sS -o body.json -w '%{http_code}' --max-time 320 -X POST -H "Authorization: Bearer $CRON_SECRET" "$SYNC_URL")
+          cat body.json; echo
+          [ "$code" = "200" ] || { echo "Sync returned HTTP $code"; exit 1; }

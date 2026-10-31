@@ -136,9 +136,13 @@ queue runs immediately in that request, using the worker's database role and han
 ledger rules apply. **Sync & process now** (admin overview and Daily returns) runs one pass of the
 worker's schedule: chain scan, deposit credits, pending allocations/adjustments/rewards,
 enrolment, accrual, maturity, settlement, offline payments, reconciliation and alerts. Accrual
-catches up every missed day, so a sync once a day (or whenever the admin opens the console) keeps
-members' balances current. Nothing accrues between syncs: a day becomes visible at the first sync
-after it ends.
+catches up every missed day.
+
+The pass also runs on a schedule, with nobody at the console: `/internal/cron/sync` (bearer
+`CRON_SECRET`, refused when unset or when `JOBS_MODE` isn't `inline`) is called every 30 minutes by
+the GitHub workflow `.github/workflows/sync.yml` (repository secrets `SYNC_URL`, `CRON_SECRET`) and
+once a day by Vercel Cron (`vercel.json`) as a backstop. Overlapping or repeated passes are harmless.
+A day's return becomes visible at the first pass after that UTC day starts.
 
 ## Calculation (reproducible)
 
@@ -146,8 +150,9 @@ after it ends.
 - `accrual = floor(principal_base × daily_rate_ppm / 1 000 000)`. Simple interest on principal, no
   compounding. Rounding down is at most one base unit (1e-18 USDT on BSC).
 - Days are UTC calendar days. The first accrual day is the day after the subscription is opened.
-  Accrual stops at the term end (`term_days` after the first day) or on the UTC day principal
-  redemption is requested (that day is not accrued). A day is accrued only after it has ended.
+  Accrual stops at the term end (`term_days` after the first day) or after the UTC day principal
+  redemption is requested (that day is accrued). A day accrues as soon as it starts, so members see
+  the day's return on that day; it becomes payable the next day at the earliest.
 - Each accrual row stores date, principal, rate, plan, amount and formula, with the journal entry
   ids, so any figure can be recomputed from immutable inputs.
 - The worker catches up missed days. A paused or late worker delays accruals but never loses or

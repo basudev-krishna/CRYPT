@@ -77,24 +77,27 @@ export function termEndDate(startDate: string, termDays: number | null): string 
 
 /**
  * Exclusive end of accrual for a subscription: the earliest of the term end and
- * the day redemption was requested (that day is not accrued).
+ * the day after redemption was requested. The request day itself is accrued:
+ * a day accrues as soon as it starts, so it may already be recorded.
  */
 export function effectiveEndDate(termEnd: string | null, redeemRequestedAt: Date | null): string | null {
-  const redeemDay = redeemRequestedAt ? utcDate(redeemRequestedAt) : null;
-  if (termEnd === null) return redeemDay;
-  if (redeemDay === null) return termEnd;
-  return redeemDay < termEnd ? redeemDay : termEnd;
+  const redeemEnd = redeemRequestedAt ? addDays(utcDate(redeemRequestedAt), 1) : null;
+  if (termEnd === null) return redeemEnd;
+  if (redeemEnd === null) return termEnd;
+  return redeemEnd < termEnd ? redeemEnd : termEnd;
 }
 
 /**
  * The days still to accrue, oldest first: from the day after the last accrued
- * day (or the start) up to, but excluding, both the end of the window and
- * today (a day is accrued only after it has ended). At most `limit` days.
+ * day (or the start) up to and including today (a day accrues as soon as it
+ * starts, so members see the day's return that day), excluding the end of the
+ * window. At most `limit` days.
  */
 export function dueAccrualDates(args: { start: string; end: string | null; lastAccrued: string | null; today: string; limit?: number }): string[] {
   const limit = args.limit ?? 400;
   let d = args.lastAccrued === null || args.lastAccrued < args.start ? args.start : addDays(args.lastAccrued, 1);
-  const stop = args.end !== null && args.end < args.today ? args.end : args.today;
+  const tomorrow = addDays(args.today, 1);
+  const stop = args.end !== null && args.end < tomorrow ? args.end : tomorrow;
   const out: string[] = [];
   while (d < stop && out.length < limit) {
     out.push(d);

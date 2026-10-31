@@ -199,8 +199,8 @@ describe('daily accrual', () => {
     await open(id);
 
     expect(await accrue(id, new Date())).toBe(0); // the opening day is not accrued
-    expect(await accrue(id, later(4))).toBe(3); // days +1, +2, +3 have ended
-    expect(await accrue(id, later(4))).toBe(0);
+    expect(await accrue(id, later(3))).toBe(3); // days +1, +2, +3 (each accrues as it starts)
+    expect(await accrue(id, later(3))).toBe(0);
     expect(await balanceOf('return_accrued', tokenId, member)).toBe(usdt('9.9'));
     expect(await balanceOf('return_cost', tokenId)).toBe(usdt('9.9'));
     expect(await balanceOf('user_cash', tokenId, member)).toBe(0n); // a promise, not money
@@ -230,8 +230,8 @@ describe('daily accrual', () => {
     await admin.query("update public.system_controls set enabled = true where key = 'return_accruals_paused'");
     expect(await accrue(id, later(3))).toBe(0);
     await admin.query("update public.system_controls set enabled = false where key = 'return_accruals_paused'");
-    expect(await accrue(id, later(3))).toBe(2); // caught up
-    expect(await accrue(id, later(30))).toBe(3); // term of 5 days, then nothing more
+    expect(await accrue(id, later(3))).toBe(3); // caught up
+    expect(await accrue(id, later(30))).toBe(2); // term of 5 days, then nothing more
     expect(await accrue(id, later(60))).toBe(0);
     expect(await count('select count(*)::int as n from public.return_accruals where subscription_id = $1', [id])).toBe(5);
   });
@@ -244,7 +244,7 @@ describe('settlement from business revenue only', () => {
     const planId = await activePlan();
     const { id } = await subscribe(member, planId, '1000');
     await open(id);
-    await accrue(id, later(4));
+    await accrue(id, later(3));
 
     // Not due yet on the accrual day itself, due the next day (payable_after_days = 0).
     expect(await mature(later(1))).toBe(0);
@@ -344,7 +344,7 @@ describe('principal redemption', () => {
     await expect(web.query("update public.plan_subscriptions set status = 'redeem_requested', redeem_requested_at = now() where id = $1", [id])).rejects.toThrow(/locked/);
   });
 
-  it('returns principal after the lock and stops accrual from the request day', async () => {
+  it('returns principal after the lock and stops accrual after the request day', async () => {
     const member = await createUser();
     await fundMember(member, '1000');
     const planId = await activePlan({ lockDays: 0 });
@@ -434,7 +434,7 @@ describe('principal and payments settled offline', () => {
     expect(await count("select count(*)::int as n from public.risk_events where kind = 'offline_subscription_recorded' and severity = 'high'")).toBe(1);
     expect(await open(id)).toBe('posted');
     expect(await balanceOf('plan_principal', tokenId, member)).toBe(0n); // off the ledger: no wallet money backs it
-    expect(await accrue(id, later(3))).toBe(2);
+    expect(await accrue(id, later(2))).toBe(2);
     expect(await balanceOf('return_accrued', tokenId, member)).toBe(usdt('6.6'));
     expect(await balanceOf('user_cash', tokenId, member)).toBe(0n);
 
@@ -447,7 +447,7 @@ describe('principal and payments settled offline', () => {
     const member = await createUser();
     const { id } = await offlineSub(member, await activePlan());
     await open(id);
-    await accrue(id, later(4)); // days +1, +2, +3
+    await accrue(id, later(3)); // days +1, +2, +3
     await mature(later(4));
     await recordRevenue('100'); // there is on-chain funding, but offline plans never draw on it
     expect(await settle()).toMatchObject({ settled: 0 });
@@ -535,7 +535,7 @@ describe('automatic enrolment of deposits', () => {
 
     const start = await one<{ d: string }>(admin, "select to_char(accrual_start_date, 'YYYY-MM-DD') as d from public.plan_subscriptions where id = $1", [sub.id]);
     expect(start.d).toBe(new Date().toISOString().slice(0, 10)); // received yesterday -> earns from today (the plan's first day)
-    expect(await accrue(sub.id, later(1))).toBe(1);
+    expect(await accrue(sub.id, new Date())).toBe(1); // today's return shows today
     expect(await balanceOf('return_accrued', tokenId, member)).toBe(usdt('3.3'));
     expect(await checkIntegrity(admin)).toEqual(clean);
   });
@@ -557,7 +557,7 @@ describe('automatic enrolment of deposits', () => {
     expect(offline).toMatchObject({ funding: 'offline', principal_base: usdt('2000').toString() });
     expect(await open(offline.id)).toBe('posted');
     expect(await balanceOf('plan_principal', tokenId, member)).toBe(0n); // offline principal stays off the ledger
-    expect(await accrue(offline.id, later(1))).toBe(1);
+    expect(await accrue(offline.id, new Date())).toBe(1);
     expect(await balanceOf('return_accrued', tokenId, member)).toBe(usdt('6.6'));
   });
 
